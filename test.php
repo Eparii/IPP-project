@@ -1,7 +1,7 @@
 <?php
 
-define("INPUT_FILE_OPENING_ERROR", 11);
-define("WRONG_DIRECTORY_ERROR", 41);
+const INPUT_FILE_OPENING_ERROR = 11;
+const WRONG_DIRECTORY_ERROR = 41;
 
 function scan_directory($dir)
 {
@@ -37,7 +37,7 @@ function scan_directory_recursive($dir, &$results)
 }
 
 
-function check_input_files($input_file, $output_file, $return_code_file, $directory_path)
+function check_input_files($input_file, $output_file, $return_code_file)
 {
     if(!is_file($input_file))
     {
@@ -90,7 +90,7 @@ $failed_array = [];
 $passed_tests = 0;
 $return_code = 0;
 $output = null;
-$jexamPath="/home/pavel/projekty/IPP-project-1/jexamxml";
+$jexamPath="/pub/courses/ipp/jexamxml";
 $recursiveArg=false;
 $directoryArg=false;
 $parseScriptArg=false;
@@ -119,7 +119,6 @@ foreach ($argv as $argument)
     {
         $directoryArg = true;
         $directory_path = substr($argument, strpos($argument,"=") + 1);
-        echo $directory_path;
     }
     else if ($argument == "--recursive")
     {
@@ -176,11 +175,11 @@ if($parseOnlyArg)
                 $input_file = preg_replace("/\.src/",".in", $test);
                 $output_file = preg_replace("/\.src/",".out", $test);
                 $return_code_file = preg_replace("/\.src/",".rc", $test);
-                check_input_files($input_file, $output_file, $return_code_file, $directory_path);
+                check_input_files($input_file, $output_file, $return_code_file);
                 $return_code_file = fopen("$return_code_file", "r");
                 $expected_return = fgets($return_code_file);
                 fclose($return_code_file);
-                exec("php8.1 parse.php $test > ./tmp/$test_output_name", $output, $return_code);
+                exec("php8.1 parse.php < $test > ./tmp/$test_output_name", $output, $return_code);
                 if ($expected_return == 0)
                 {
                     exec("java -jar $jexamPath/jexamxml.jar ./tmp/$test_output_name $output_file delta.xml $jexamPath/options", $output, $return_code);
