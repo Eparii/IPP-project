@@ -1,17 +1,27 @@
 <?php
 
+/*
+
+ * Autor: Tetauer Pavel
+ * Login: xtetau00
+ * Rok: 2021/2022
+
+*/
+
 const WRONG_ARGUMENTS_ERROR = 10;
 const MISSING_HEADER_ERROR = 21;
 const WRONG_OPCODE_ERROR = 22;
 const SYNTACTIC_OR_SEMANTIC_ERROR = 23;
 ini_set('display_errors', 'stderr');
 
+/* funkce sloužící pro kontrolu escape sekvencí */
 function check_escapes($code) : bool
 {
     for ($i = 0; $i < strlen($code); $i++)
     {
         if ($code[$i] == "\\")
         {
+            // pokud nalezne \, následující 3 znaky musí být čísla
             if (strlen($code) < $i + 3 || !is_numeric($code[$i+1]) || !is_numeric($code[$i+2]) || !is_numeric($code[$i+3]))
             {
                 return false;
@@ -25,11 +35,14 @@ function check_escapes($code) : bool
     return true;
 }
 
+
+/* overuje, zda se jedna o spravne zapsany label */
 function is_label($code) : bool
 {
     return preg_match("/^[a-zA-Z_$&%*!?-][a-zA-Z0-9_$&%*!?-]*$/", $code);
 }
 
+/* overi label a pokud je spravne zapsany, vytiskne odpovidajici XML */
 function check_and_print_label($code, $arg_num, $is_last_arg, $line)
 {
     if (!is_label($code))
@@ -42,6 +55,7 @@ function check_and_print_label($code, $arg_num, $is_last_arg, $line)
         printf("\t</instruction>\n");
     }
 }
+/* overi typ a pokud je spravne zapsany, vytiskne odpovidajici XML */
 function check_and_print_type($code, $arg_num, $is_last_arg, $line)
 {
     if ($code == "string" || $code == "int" || $code == "bool")
@@ -58,25 +72,31 @@ function check_and_print_type($code, $arg_num, $is_last_arg, $line)
     }
 }
 
+/* overi promennou a pokud je spravne zapsana, vytiskne odpovidajici XML */
 function is_var($code) : bool
 {
     return preg_match("/^(LF|GF|TF)@[a-zA-Z_$&%*!?-][a-zA-Z0-9_$&%*!?-]*$/", $code);
 }
 
+/* overi konstantu a pokud je spravne zapsana, vytiskne odpovidajici XML */
 function is_const($code) : bool
 {
+    // jedna se o string
     if (preg_match("/^string@\S*$/", $code))
     {
         return (check_escapes($code));
     }
+    // jedna se o bool se spravnou hodnotou
     else if (preg_match("/^bool@(false|true)$/", $code))
     {
         return true;
     }
+    // jedna se o integer
     else if (preg_match("/^int@[+-]?[a-zA-Z0-9_$&%*!?-]+$/", $code))
     {
         return true;
     }
+    // jedna se o nil s jedinou moznou hodnotou nil
     else if (preg_match("/^nil@nil$/", $code))
     {
         return true;
@@ -87,10 +107,12 @@ function is_const($code) : bool
 
 function check_and_print_var($code, $arg_num, $is_last_arg, $line)
 {
-    if (!is_var($code))
+    if (!is_var($code)) // nejedna se o promennou
     {
         print_error(SYNTACTIC_OR_SEMANTIC_ERROR, $line);
     }
+    /*  nahradi znaky, ktere by delaly problem ve vysledne XML reprezentaci
+        jejich odpovidajicimi XML entitami */
     $code = replace_problematic_characters($code);
     printf("\t\t<arg%d type=\"var\">%s</arg%d>\n", $arg_num, $code, $arg_num);
     if ($is_last_arg)
@@ -99,6 +121,7 @@ function check_and_print_var($code, $arg_num, $is_last_arg, $line)
     }
 }
 
+/* funkce, slouzici na kontrolu a nasledny zapis konstanty */
 function check_and_print_const($code, $arg_num, $is_last_arg, $line)
 {
     if (!is_const($code))
@@ -114,7 +137,7 @@ function check_and_print_const($code, $arg_num, $is_last_arg, $line)
         printf("\t</instruction>\n");
     }
 }
-
+/* funkce, ktera kontroluje operandy, ktere mohou byt promenna i konstanta */
 function check_and_print_symb($code, $arg_num, $is_last_arg, $line)
 {
     if (is_var($code))
@@ -131,7 +154,7 @@ function check_and_print_symb($code, $arg_num, $is_last_arg, $line)
     }
 }
 
-
+/* funkce vypisujici errory */
 function print_error ($errorcode, $line)
 {
     switch ($errorcode)
@@ -150,16 +173,17 @@ function print_error ($errorcode, $line)
             exit(SYNTACTIC_OR_SEMANTIC_ERROR);
     }
 }
-
+/* funkce odstranujici komentare a prebytecne bile znaky */
 function remove_commentary_and_whitespaces ($line) : string
 {
-    $line = rtrim($line, "\n");
-    $line = ltrim($line);
-    $line = preg_replace("/\s+/", ' ', $line);
-    if(str_contains($line, '#'))
+    $line = rtrim($line, "\n"); // odstrani novy radek
+    $line = ltrim($line); // odstrani mezery na zacatku radku
+    $line = preg_replace("/\s+/", ' ', $line); // odstrani prebytecne mezery uvnitr retezce
+    if(str_contains($line, '#')) // odstrani komentar
     {
         $line = substr($line, 0, strpos($line, '#'));
     }
+    // po odstraneni komentare odstrani pripadne vznikle mezery na konci radku
     while (str_ends_with($line,' '))
     {
         $line = rtrim($line, ' ');
@@ -167,10 +191,11 @@ function remove_commentary_and_whitespaces ($line) : string
     return $line;
 }
 
+/* funkce nahrazujici znaky, ktere by delaly problemy v XML reprezentaci */
 function replace_problematic_characters($line) : string
 {
-    $problematic = ["<", ">"];
-    $replacement = ["&lt;", "&gt;"];
+    $problematic = ["<", ">", "'", "\""];
+    $replacement = ["&lt;", "&gt;", "&apos;", "&quot;"];
     $line = str_replace("&", "&amp;", $line);
     return str_replace($problematic, $replacement, $line);
 }
@@ -182,6 +207,7 @@ if ($argc == 2)
     {
         printf ("Použití: parser.php [--help] < input_file
     chybové kódy:
+    10 - špatné argumenty, povolen je pouze samostatný argument --help
     21 - chybná nebo chybějící hlavička ve zdrojovém kódu zapsaném v IPPcode22
     22 - neznámý nebo chybný operační kód ve zdrojovém kódu zapsaném v IPPcode22
     23 - jiná lexikální nebo syntaktická chyba zdrojového kódu zapsaného v IPPcode22\n");
@@ -210,6 +236,7 @@ if (ftell(STDIN) !== FALSE)
         {
             continue;
         }
+        // pokud se jedna o prvni radek, musi obsahovat identifikator jazyka
         if ($first)
         {
             if ($line != ".IPPcode22")
