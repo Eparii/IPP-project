@@ -1,0 +1,5 @@
+1c1
+< 42
+\ Chybí znak konce řádku na konci souboru
+---
+> 421

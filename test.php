@@ -90,7 +90,7 @@ $failed_array = [];
 $passed_tests = 0;
 $return_code = 0;
 $output = null;
-$jexamPath="/pub/courses/ipp/jexamxml";
+$jexamPath="/home/Epari/projekty/IPP-project/jexamxml";
 $recursiveArg=false;
 $directoryArg=false;
 $parseScriptArg=false;
@@ -159,58 +159,87 @@ if (!is_dir("tmp"))
 {
     mkdir("tmp");
 }
-if($parseOnlyArg)
+if (!is_dir($directory_path) || !is_readable($directory_path))
 {
-        if (!is_dir($directory_path) || !is_readable($directory_path))
+    printf("Couldn't reach the directory!\n");
+    exit(WRONG_DIRECTORY_ERROR);
+}
+
+$recursiveArg ? $all_tests_array = scan_directory_recursive($directory_path, $all_tests_array) : $all_tests_array = scan_directory($directory_path);
+foreach ($all_tests_array as $src_file)
+{
+    $test_output_name = preg_replace("/\.src/", "_test.out", substr($src_file, strrpos($src_file, '/') + 1));
+    $input_file = preg_replace("/\.src/", ".in", $src_file);
+    $output_file = preg_replace("/\.src/", ".out", $src_file);
+    $return_code_file = preg_replace("/\.src/", ".rc", $src_file);
+    check_input_files($input_file, $output_file, $return_code_file);
+    $return_code_file = fopen("$return_code_file", "r");
+    $expected_return = fgets($return_code_file);
+    fclose($return_code_file);
+    if ($parseOnlyArg)
+    {
+        exec("php8.1 parse.php < $src_file > ./tmp/$test_output_name", $output, $return_code);
+        if ($expected_return == 0)
         {
-            printf("Couldn't reach the directory!\n");
-            exit(WRONG_DIRECTORY_ERROR);
-        }
-        $recursiveArg ? $all_tests_array = scan_directory_recursive($directory_path, $all_tests_array) : $all_tests_array = scan_directory($directory_path);
-        foreach ($all_tests_array as $test)
-        {
-            if (preg_match("/.+\.src/", $test))
+            exec("java -jar $jexamPath/jexamxml.jar ./tmp/$test_output_name $output_file delta.xml $jexamPath/options", $output, $return_code);
+            if ($return_code == 0)
             {
-                $test_output_name = preg_replace("/\.src/","_test.out", substr($test, strrpos($test, '/') + 1));
-                $input_file = preg_replace("/\.src/",".in", $test);
-                $output_file = preg_replace("/\.src/",".out", $test);
-                $return_code_file = preg_replace("/\.src/",".rc", $test);
-                check_input_files($input_file, $output_file, $return_code_file);
-                $return_code_file = fopen("$return_code_file", "r");
-                $expected_return = fgets($return_code_file);
-                fclose($return_code_file);
-                exec("php8.1 parse.php < $test > ./tmp/$test_output_name", $output, $return_code);
-                if ($expected_return == 0)
-                {
-                    exec("java -jar $jexamPath/jexamxml.jar ./tmp/$test_output_name $output_file delta.xml $jexamPath/options", $output, $return_code);
-                    if ($return_code == 0)
-                    {
-                        $passed_tests++;
-                    }
-                    else
-                    {
-                        $failed_tests++;
-                        array_push($failed_array, $test);
-                    }
-                }
-                else
-                {
-                    if ($expected_return == $return_code)
-                    {
-                        $passed_tests++;
-                    }
-                    else
-                    {
-                        $failed_tests++;
-                        array_push($failed_array, $test);
-                    }
-                }
+                $passed_tests++;
+            }
+            else
+            {
+                $failed_tests++;
+                array_push($failed_array, $src_file);
             }
         }
-        printf("list of failed tests:\n");
-        print_r($failed_array);
-        printf("failed tests = %d\npassed tests = %d\n", $failed_tests, $passed_tests);
+        else
+        {
+            if ($expected_return == $return_code)
+            {
+                $passed_tests++;
+            }
+            else
+            {
+                $failed_tests++;
+                array_push($failed_array, $src_file);
+            }
+        }
+    }
+    else if ($intOnlyArg)
+    {
+        exec("python3 interpret.py --source=$src_file --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+        if ($expected_return == 0)
+        {
+            exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);
+            if ($return_code == 0)
+            {
+                $passed_tests++;
+            }
+            else
+            {
+                $failed_tests++;
+                array_push($failed_array, $src_file);
+            }
+        }
+        else
+        {
+            if ($expected_return == $return_code)
+            {
+                $passed_tests++;
+            }
+            else
+            {
+                $failed_tests++;
+                array_push($failed_array, $src_file);
+            }
+        }
+    }
 }
+
+
+printf("list of failed tests:\n");
+print_r($failed_array);
+printf("failed tests = %d\npassed tests = %d\n", $failed_tests, $passed_tests);
 
 if (!$nocleanArg)
 {
