@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<program language="IPPcode22" name="correct">
+	<instruction order="8" opcode="WRITE">
+        	<arg1 type="string">ahoj\032kamo</arg1>
+    </instruction>
+</program>
