@@ -6,7 +6,6 @@ instructions_list = []
 labels_list = []
 lf_stack = []
 tf_defined = 0
-lf_defined = 0
 value_stack = []
 type_stack = []
 call_stack = []
@@ -24,6 +23,8 @@ class argument:
     def get_value(self):
         if self.type == "var":
             return re.sub(r".+@", "", self.value)
+        elif self.type == "int":
+            return int(self.value)
         else:
             return self.value
 
@@ -48,6 +49,9 @@ class instruction:
 
     def get_opcode(self):
         return self.opcode
+
+    def get_order(self):
+        return self.order
 
 
 class variable:
@@ -83,6 +87,8 @@ class frame:
         self.variables = []
 
     def add_var(self, var_name, var_type, var_value):
+        if self.search_var(var_name) is not None:
+            print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
         self.variables.append(variable(var_name, var_type, var_value))
 
     def search_var(self, name):
@@ -106,6 +112,7 @@ UNDEFINED_VARIABLE_ERROR = 54
 UNDEFINED_FRAME_ERROR = 55
 MISSING_VALUE_ERROR = 56
 WRONG_OPERAND_VALUE_ERROR = 57
+WRONG_STRING_WORKING_ERROR = 58
 
 
 # funkce na vypis chybovych hlasek a ukonceni programu
@@ -127,9 +134,11 @@ def print_error(errorcode):
     elif errorcode == UNDEFINED_FRAME_ERROR:
         sys.stderr.write("Undefined frame!\n")
     elif errorcode == MISSING_VALUE_ERROR:
-        sys.stderr.write("Missing value!")
+        sys.stderr.write("Missing value!\n")
     elif errorcode == WRONG_OPERAND_VALUE_ERROR:
-        sys.stderr.write("Wrong operand type!")
+        sys.stderr.write("Wrong operand type!\n")
+    elif errorcode == WRONG_STRING_WORKING_ERROR:
+        sys.stderr.write("Wrong working with string!\n")
     exit(errorcode)
 
 
@@ -199,6 +208,17 @@ def search_instruction(order):
         return None
 
 
+# funkce vraci index daneho labelu v seznamu instrukci
+def get_label_index(name):
+    i = 0
+    while i < len(instructions_list):
+        instr = instructions_list[i]
+        if instr.get_opcode() == "LABEL" and instr.get_argument(1).get_value() == name:
+            return i
+        i += 1
+    return None
+
+
 # funkce slouzici na ulozeni promenne do prislusneho frame-u
 def save_variable(gf, tf, lf, var_frame, name):
     if var_frame == "GF":
@@ -214,8 +234,12 @@ def search_variable(gf, tf, lf, var_frame, name):
     if var_frame == "GF":
         return gf.search_var(name)
     elif var_frame == "TF":
+        if tf_defined == 0:
+            print_error(UNDEFINED_FRAME_ERROR)
         return tf.search_var(name)
     elif var_frame == "LF":
+        if not lf_stack:
+            print_error(UNDEFINED_FRAME_ERROR)
         return lf.search_var(name)
 
 
@@ -235,15 +259,16 @@ def save_instructions(tree_root):
             print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
         new_instruction = instruction(instr.get("opcode"), int(instr.get("order")), 3)
         instructions_list.append(new_instruction)
-        # pokud se jedna o label, prida instrukci i na seznam labelu
-        if new_instruction.opcode == "LABEL":
-            labels_list.append(new_instruction)
         for arg in instr:
             # overeni, zda se jedna o validni zapis argumentu
             if re.match(r"arg\d", arg.tag):
                 new_instruction.add_argument(int(re.sub(r"\D", "", arg.tag)), arg.get("type"), arg.text)
             else:
                 print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
+        if instr.get("opcode") == "LABEL":
+            if new_instruction.get_argument(1).get_value() in labels_list:
+                print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+            labels_list.append(new_instruction.get_argument(1).get_value())
     instructions_list.sort(key=lambda x: x.order)
 
 
@@ -273,8 +298,12 @@ def execute_defvar(gf, tf, lf, instr):
         if arg.get_frame() == "GF":
             gf.add_var(arg.get_value(), "", "")
         elif arg.get_frame() == "TF":
+            if tf_defined == 0:
+                print_error(UNDEFINED_FRAME_ERROR)
             tf.add_var(arg.get_value(), "", "")
         elif arg.get_frame() == "LF":
+            if not lf_stack:
+                print_error(UNDEFINED_FRAME_ERROR)
             lf.add_var(arg.get_value(), "", "")
 
 
@@ -288,7 +317,7 @@ def execute_write(gf, tf, lf, instr):
                 if re.search(r'\\([0-9]{3})', arg.get_value()):
                     print(re.sub(r'\\([0-9]{3})', lambda x: chr(int(x[1])), arg.get_value()), end='')
                 else:
-                    print(var.get_value(), end='')
+                    print(arg.get_value(), end='')
             else:
                 print(arg.get_value(), end='')
     else:
@@ -329,7 +358,10 @@ def execute_pops(gf, tf, lf, instr):
     else:
         var = search_variable(gf, tf, lf, arg.get_frame(), arg.get_value())
         if var is not None:
-            var.edit_value(value_stack.pop(), type_stack.pop())
+            try:
+                var.edit_value(value_stack.pop(), type_stack.pop())
+            except IndexError:
+                print_error(MISSING_VALUE_ERROR)
 
 
 def execute_int2char(gf, tf, lf, instr):
@@ -341,12 +373,22 @@ def execute_int2char(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
-        var.edit_value(chr(arg2.get_value), "string")
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        try:
+            var.edit_value(chr(arg2.get_value()), "string")
+        except ValueError:
+            print_error(WRONG_STRING_WORKING_ERROR)
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
             print_error(UNDEFINED_VARIABLE_ERROR)
-        var.edit_value(chr(var2.get_value()), "string")
+        if var2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        try:
+            var.edit_value(chr(var2.get_value()), "string")
+        except ValueError:
+            print_error(WRONG_STRING_WORKING_ERROR)
 
 
 def execute_add(gf, tf, lf, instr):
@@ -358,38 +400,38 @@ def execute_add(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(arg2.get_value()) + int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(arg2.get_value() + arg3.get_value(), "int")
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(arg2.get_value()) + int(var2.get_value()), "int")
-            except ValueError:
+            if var2.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(arg2.get_value() + var2.get_value(), "int")
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
             print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(var2.get_value()) + int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() + arg3.get_value(), "int")
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(var2.get_value()) + int(var3.get_value()), "int")
-            except ValueError:
+            if var3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() + var3.get_value(), "int")
 
 
 def execute_sub(gf, tf, lf, instr):
@@ -401,38 +443,38 @@ def execute_sub(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(arg2.get_value()) - int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(arg2.get_value() - arg3.get_value(), "int")
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(arg2.get_value()) - int(var2.get_value()), "int")
-            except ValueError:
+            if var2.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(arg2.get_value() - var2.get_value(), "int")
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
             print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(var2.get_value()) - int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() - arg3.get_value(), "int")
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(var2.get_value()) - int(var3.get_value()), "int")
-            except ValueError:
+            if var3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() - var3.get_value(), "int")
 
 
 def execute_mul(gf, tf, lf, instr):
@@ -444,38 +486,38 @@ def execute_mul(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(arg2.get_value()) * int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(arg2.get_value() * arg3.get_value(), "int")
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(arg2.get_value()) * int(var2.get_value()), "int")
-            except ValueError:
+            if var2.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(int(arg2.get_value()) * int(var2.get_value()), "int")
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
             print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(var2.get_value()) * int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() * arg3.get_value(), "int")
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(var2.get_value()) * int(var3.get_value()), "int")
-            except ValueError:
+            if var3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            var.edit_value(var2.get_value() * var3.get_value(), "int")
 
 
 def execute_idiv(gf, tf, lf, instr):
@@ -487,44 +529,48 @@ def execute_idiv(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(arg2.get_value()) // int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            try:
+                var.edit_value(arg2.get_value() // arg3.get_value(), "int")
             except ZeroDivisionError:
                 print_error(WRONG_OPERAND_VALUE_ERROR)
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(arg2.get_value()) // int(var2.get_value()), "int")
-            except ValueError:
+            if var2.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            try:
+                var.edit_value(arg2.get_value() // var2.get_value(), "int")
             except ZeroDivisionError:
                 print_error(WRONG_OPERAND_VALUE_ERROR)
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
             print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            try:
-                var.edit_value(int(var2.get_value()) // int(arg3.get_value()), "int")
-            except ValueError:
+            if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            try:
+                var.edit_value(var2.get_value() // arg3.get_value(), "int")
             except ZeroDivisionError:
                 print_error(WRONG_OPERAND_VALUE_ERROR)
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            try:
-                var.edit_value(int(var2.get_value()) // int(var3.get_value()), "int")
-            except ValueError:
+            if var3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
+            try:
+                var.edit_value(var2.get_value() // var3.get_value(), "int")
             except ZeroDivisionError:
                 print_error(WRONG_OPERAND_VALUE_ERROR)
 
@@ -540,7 +586,7 @@ def execute_gt(gf, tf, lf, instr):
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type():
+            if arg2.get_type() != arg3.get_type() or arg2.get_type() == "nil" or arg3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() > arg3.get_value():
                 var.edit_value("true", "bool")
@@ -550,7 +596,7 @@ def execute_gt(gf, tf, lf, instr):
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != arg2.get_type():
+            if var2.get_type() != arg2.get_type() or var2.get_type() == "nil" or arg2.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() > var2.get_value():
                 var.edit_value("true", "bool")
@@ -562,7 +608,7 @@ def execute_gt(gf, tf, lf, instr):
             print_error(UNDEFINED_VARIABLE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type():
+            if var2.get_type() != arg3.get_type() or var2.get_type() == "nil" or arg3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() > arg3.get_value():
                 var.edit_value("true", "bool")
@@ -572,7 +618,7 @@ def execute_gt(gf, tf, lf, instr):
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != var3.get_type():
+            if var2.get_type() != var3.get_type() or var2.get_type() == "nil" or var3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() > var3.get_value():
                 var.edit_value("true", "bool")
@@ -591,7 +637,7 @@ def execute_lt(gf, tf, lf, instr):
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type():
+            if arg2.get_type() != arg3.get_type() or arg2.get_type() == "nil" or arg3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() < arg3.get_value():
                 var.edit_value("true", "bool")
@@ -601,7 +647,7 @@ def execute_lt(gf, tf, lf, instr):
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != arg2.get_type():
+            if var2.get_type() != arg2.get_type() or var2.get_type() == "nil" or arg2.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() < var2.get_value():
                 var.edit_value("true", "bool")
@@ -613,7 +659,7 @@ def execute_lt(gf, tf, lf, instr):
             print_error(UNDEFINED_VARIABLE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type():
+            if var2.get_type() != arg3.get_type() or var2.get_type() == "nil" or arg3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() < arg3.get_value():
                 var.edit_value("true", "bool")
@@ -623,7 +669,7 @@ def execute_lt(gf, tf, lf, instr):
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != var3.get_type():
+            if var2.get_type() != var3.get_type() or var2.get_type() == "nil" or var3.get_type() == "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() < var3.get_value():
                 var.edit_value("true", "bool")
@@ -642,7 +688,7 @@ def execute_eq(gf, tf, lf, instr):
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type():
+            if arg2.get_type() != arg3.get_type() and arg2.get_type() != "nil" and arg3.get_type() != "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() == arg3.get_value():
                 var.edit_value("true", "bool")
@@ -652,7 +698,7 @@ def execute_eq(gf, tf, lf, instr):
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != arg2.get_type():
+            if var2.get_type() != arg2.get_type() and var2.get_type() != "nil" and arg2.get_type() != "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() == var2.get_value():
                 var.edit_value("true", "bool")
@@ -664,7 +710,7 @@ def execute_eq(gf, tf, lf, instr):
             print_error(UNDEFINED_VARIABLE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type():
+            if var2.get_type() != arg3.get_type() and var2.get_type() != "nil" and arg3.get_type() != "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() == arg3.get_value():
                 var.edit_value("true", "bool")
@@ -674,7 +720,7 @@ def execute_eq(gf, tf, lf, instr):
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
-            if var2.get_type() != var3.get_type():
+            if var2.get_type() != var3.get_type() and var2.get_type() != "nil" and var3.get_type() != "nil":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if var2.get_value() == var3.get_value():
                 var.edit_value("true", "bool")
@@ -690,8 +736,8 @@ def execute_read(file, gf, tf, lf, instr):
     if var is None:
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
-    if arg2.get_type() != "type":
-        print_error(WRONG_ARGUMENTS_ERROR)
+    if arg2.get_type() != "type" or arg2.get_type() == "nil":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
     line = file.readline()
     line = line.rstrip()
     if not line:
@@ -702,6 +748,11 @@ def execute_read(file, gf, tf, lf, instr):
                 var.edit_value("true", "bool")
             else:
                 var.edit_value("false", "bool")
+        elif arg2.get_value() == "int":
+            try:
+                var.edit_value(int(line), arg2.get_value())
+            except ValueError:
+                var.edit_value("nil", "nil")
         else:
             var.edit_value(line, arg2.get_value())
 
@@ -715,9 +766,11 @@ def execute_and(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
+        if arg2.get_type() != "bool":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg2.get_type() != "bool":
+            if arg3.get_type() != "bool":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             if arg2.get_value() == "true" and arg3.get_value() == "true":
                 var.edit_value("true", "bool")
@@ -760,57 +813,58 @@ def execute_and(gf, tf, lf, instr):
 
 
 def execute_or(gf, tf, lf, instr):
-    def execute_and(gf, tf, lf, instr):
-        arg1 = instr.get_argument(1)
-        if arg1.get_type() != "var":
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "var":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
+    if var is None:
+        print_error(UNDEFINED_VARIABLE_ERROR)
+    arg2 = instr.get_argument(2)
+    if arg2.get_type() != "var":
+        if arg2.get_type() != "bool":
             print_error(WRONG_OPERAND_TYPE_ERROR)
-        var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-        if var is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        arg2 = instr.get_argument(2)
-        if arg2.get_type() != "var":
-            arg3 = instr.get_argument(3)
-            if arg3.get_type() != "var":
-                if arg2.get_type() != "bool":
-                    print_error(WRONG_OPERAND_TYPE_ERROR)
-                if arg2.get_value() == "true" or arg3.get_value() == "true":
-                    var.edit_value("true", "bool")
-                else:
-                    var.edit_value("false", "bool")
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if arg3.get_type() != "bool":
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg2.get_value() == "true" or arg3.get_value() == "true":
+                var.edit_value("true", "bool")
             else:
-                var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-                if var2 is None:
-                    print_error(UNDEFINED_VARIABLE_ERROR)
-                if var2.get_type() != "bool":
-                    print_error(WRONG_OPERAND_TYPE_ERROR)
-                if arg2.get_value() == "true" or var2.get_value() == "true":
-                    var.edit_value("true", "bool")
-                else:
-                    var.edit_value("false", "bool")
+                var.edit_value("false", "bool")
         else:
-            var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
             if var2.get_type() != "bool":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            arg3 = instr.get_argument(3)
-            if arg3.get_type() != "var":
-                if arg3.get_type() != "bool":
-                    print_error(WRONG_OPERAND_TYPE_ERROR)
-                if arg3.get_value() == "true" or var2.get_value() == "true":
-                    var.edit_value("true", "bool")
-                else:
-                    var.edit_value("false", "bool")
+            if arg2.get_value() == "true" or var2.get_value() == "true":
+                var.edit_value("true", "bool")
             else:
-                var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-                if var3 is None:
-                    print_error(UNDEFINED_VARIABLE_ERROR)
-                if var3.get_type() != "bool":
-                    print_error(WRONG_OPERAND_TYPE_ERROR)
-                if var2.get_value() == "true" or var3.get_value() == "true":
-                    var.edit_value("true", "bool")
-                else:
-                    var.edit_value("false", "bool")
+                var.edit_value("false", "bool")
+    else:
+        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+        if var2 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "bool":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if arg3.get_type() != "bool":
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg3.get_value() == "true" or var2.get_value() == "true":
+                var.edit_value("true", "bool")
+            else:
+                var.edit_value("false", "bool")
+        else:
+            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+            if var3 is None:
+                print_error(UNDEFINED_VARIABLE_ERROR)
+            if var3.get_type() != "bool":
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if var2.get_value() == "true" or var3.get_value() == "true":
+                var.edit_value("true", "bool")
+            else:
+                var.edit_value("false", "bool")
 
 
 def execute_not(gf, tf, lf, instr):
@@ -822,9 +876,19 @@ def execute_not(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
-        if arg2.get_type != "bool":
+        if arg2.get_type() != "bool":
             print_error(WRONG_OPERAND_TYPE_ERROR)
-        if arg2.get_value == "true":
+        if arg2.get_value() == "true":
+            var.edit_value("false", "bool")
+        else:
+            var.edit_value("true", "bool")
+    else:
+        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+        if var2 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        if var2.get_type() != "bool":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if var2.get_value() == "true":
             var.edit_value("false", "bool")
         else:
             var.edit_value("true", "bool")
@@ -901,7 +965,7 @@ def execute_type(gf, tf, lf, instr):
         print_error(UNDEFINED_VARIABLE_ERROR)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
-        var.edit_value(arg2.get_type(), "string")
+        var.edit_value(arg2.get_value(), "string")
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         var.edit_value(var2.get_type(), "string")
@@ -926,6 +990,17 @@ def execute_exit(gf, tf, lf, instr):
         exit(int(var.get_value()))
 
 
+def execute_dprint(gf, tf, lf, instr):
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "var":
+        sys.stderr.write(arg1.get_value())
+    else:
+        var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
+        if var is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        sys.stderr.write("{}".format(var.get_value()))
+
+
 def execute_stri2int(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "var":
@@ -941,14 +1016,24 @@ def execute_stri2int(gf, tf, lf, instr):
         if arg3.get_type() != "var":
             if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(ord(arg2.get_value()[int(arg3.get_value())]), "int")
+            if arg3.get_value() < 0:
+                print_error(WRONG_STRING_WORKING_ERROR)
+            try:
+                var.edit_value(ord(arg2.get_value()[int(arg3.get_value())]), "int")
+            except IndexError:
+                print_error(WRONG_STRING_WORKING_ERROR)
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
             if var2.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(ord(arg2.get_value()[int(var2.get_value())]), "int")
+            if var2.get_value() < 0:
+                print_error(WRONG_STRING_WORKING_ERROR)
+            try:
+                var.edit_value(ord(arg2.get_value()[int(var2.get_value())]), "int")
+            except IndexError:
+                print_error(WRONG_STRING_WORKING_ERROR)
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
@@ -959,14 +1044,24 @@ def execute_stri2int(gf, tf, lf, instr):
         if arg3.get_type() != "var":
             if arg3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(ord(var2.get_value()[int(arg3.get_value())]), "int")
+            if arg3.get_value() < 0:
+                print_error(WRONG_STRING_WORKING_ERROR)
+            try:
+                var.edit_value(ord(var2.get_value()[int(arg3.get_value())]), "int")
+            except IndexError:
+                print_error(WRONG_STRING_WORKING_ERROR)
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
             if var3.get_type() != "int":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(ord(var2.get_value()[int(var3.get_value())]), "int")
+            if var3.get_value() < 0:
+                print_error(WRONG_STRING_WORKING_ERROR)
+            try:
+                var.edit_value(ord(var2.get_value()[int(var3.get_value())]), "int")
+            except IndexError:
+                print_error(WRONG_STRING_WORKING_ERROR)
 
 
 def execute_getchar(gf, tf, lf, instr):
@@ -1029,14 +1124,18 @@ def execute_setchar(gf, tf, lf, instr):
         if arg3.get_type() != "var":
             if arg3.get_type() != "string":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var.get_value()[:arg2.get_value()] + arg3.get_value() + var.get_value()[arg2.get_value()+1:], "string")
+            var.edit_value(
+                var.get_value()[:arg2.get_value()] + arg3.get_value() + var.get_value()[arg2.get_value() + 1:],
+                "string")
         else:
             var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var2 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
             if var2.get_type() != "string":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var.get_value()[:arg2.get_value()] + var2.get_value() + var.get_value()[arg2.get_value()+1:], "string")
+            var.edit_value(
+                var.get_value()[:arg2.get_value()] + var2.get_value() + var.get_value()[arg2.get_value() + 1:],
+                "string")
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
@@ -1047,17 +1146,158 @@ def execute_setchar(gf, tf, lf, instr):
         if arg3.get_type() != "var":
             if arg3.get_type() != "string":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var.get_value()[:var2.get_value()] + arg3.get_value() + var.get_value()[var2.get_value()+1:], "string")
+            var.edit_value(
+                var.get_value()[:var2.get_value()] + arg3.get_value() + var.get_value()[var2.get_value() + 1:],
+                "string")
         else:
             var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
             if var3 is None:
                 print_error(UNDEFINED_VARIABLE_ERROR)
             if var3.get_type() != "string":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var.get_value()[:var2.get_value()] + var3.get_value() + var.get_value()[var2.get_value()+1:], "string")
+            var.edit_value(
+                var.get_value()[:var2.get_value()] + var3.get_value() + var.get_value()[var2.get_value() + 1:],
+                "string")
+
+
+def execute_jump(instr):
+    index = get_label_index(instr.get_argument(1).get_value())
+    if index is None:
+        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    return index
+
+
+def execute_jumpifeq(gf, tf, lf, instr, i):
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "label":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    index = get_label_index(instr.get_argument(1).get_value())
+    if index is None:
+        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    arg2 = instr.get_argument(2)
+    if arg2.get_type() != "var":
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if arg2.get_type() != arg3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg2.get_value() == arg3.get_value():
+                return index
+        else:
+            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+            if var2 is None:
+                print_error(UNDEFINED_VARIABLE_ERROR)
+            if var2.get_type() != arg2.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg2.get_value() == var2.get_value():
+                return index
+    else:
+        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+        if var2 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if var2.get_type() != arg3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if var2.get_value() == arg3.get_value():
+                return index
+        else:
+            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+            if var3 is None:
+                print_error(UNDEFINED_VARIABLE_ERROR)
+            if var2.get_type() != var3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if var2.get_value() == var3.get_value():
+                return index
+    return i
+
+
+def execute_jumpifneq(gf, tf, lf, instr, i):
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "label":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    index = get_label_index(instr.get_argument(1).get_value())
+    if index is None:
+        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    arg2 = instr.get_argument(2)
+    if arg2.get_type() != "var":
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if arg2.get_type() != arg3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg2.get_value() != arg3.get_value():
+                return index
+        else:
+            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+            if var2 is None:
+                print_error(UNDEFINED_VARIABLE_ERROR)
+            if var2.get_type() != arg2.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if arg2.get_value() != var2.get_value():
+                return index
+    else:
+        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+        if var2 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        arg3 = instr.get_argument(3)
+        if arg3.get_type() != "var":
+            if var2.get_type() != arg3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if var2.get_value() != arg3.get_value():
+                return index
+        else:
+            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+            if var3 is None:
+                print_error(UNDEFINED_VARIABLE_ERROR)
+            if var2.get_type() != var3.get_type():
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+            if var2.get_value() != var3.get_value():
+                return index
+    return i
+
+
+def execute_call(instr, i):
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "label":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    index = get_label_index(instr.get_argument(1).get_value())
+    if index is None:
+        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    call_stack.append(i)
+    return index
+
+
+def execute_return():
+    try:
+        return call_stack.pop()
+    except IndexError:
+        print_error(MISSING_VALUE_ERROR)
+
+
+def execute_break(gf, tf, lf):
+    sys.stderr.write("Obsah GF:\n")
+    sys.stderr.write("{}\n".format(gf))
+    sys.stderr.write("Obsah TF:\n")
+    sys.stderr.write("{}\n".format(tf))
+    sys.stderr.write("Obsah LF:\n")
+    sys.stderr.write("{}\n".format(lf))
+
+
+def execute_pushframe(tfdefined, tf):
+    if tfdefined == 0:
+        print_error(UNDEFINED_FRAME_ERROR)
+    lf_stack.append(tf)
+    return 0
+
+
+def execute_popframe():
+    try:
+        return lf_stack.pop(), 1
+    except IndexError:
+        print_error(UNDEFINED_FRAME_ERROR)
 
 
 def execute_instructions(input_path):
+    global tf_defined
     file = open(input_path)
     gf = lf = tf = frame()
     i = 0
@@ -1069,19 +1309,21 @@ def execute_instructions(input_path):
             execute_move(gf, tf, lf, instr)
         elif instr_opcode == "CREATEFRAME":
             tf_defined = 1
-            tf.edit_variables([])
+            tf = frame()
         elif instr_opcode == "PUSHFRAME":
-            lf_stack.append(tf)
-            tf_defined = 0
+            tf_defined = execute_pushframe(tf_defined, tf)
+            if len(lf_stack) > 0:
+                lf = lf_stack[len(lf_stack)-1]
         elif instr_opcode == "POPFRAME":
-            tf_defined = 1
-            tf = lf_stack.pop()
+            tf, tf_defined = execute_popframe()
+            if len(lf_stack) > 0:
+                lf = lf_stack[len(lf_stack)-1]
         elif instr_opcode == "DEFVAR":
             execute_defvar(gf, tf, lf, instr)
-        # elif instr_opcode == "CALL":
-        #     i = execute_call(gf, tf, lf, instr())
-        # elif instr_opcode == "RETURN":
-        #     i = execute_return(gf, tf, lf, instr())
+        elif instr_opcode == "CALL":
+            i = execute_call(instr, i)
+        elif instr_opcode == "RETURN":
+            i = execute_return()
         elif instr_opcode == "PUSHS":
             execute_pushs(gf, tf, lf, instr)
         elif instr_opcode == "POPS":
@@ -1124,20 +1366,21 @@ def execute_instructions(input_path):
             execute_setchar(gf, tf, lf, instr)
         elif instr_opcode == "TYPE":
             execute_type(gf, tf, lf, instr)
-        # elif instr_opcode == "LABEL":
-        #     execute_label(gf, tf, lf, instr)
-        # elif instr_opcode == "JUMP":
-        #     execute_jump(gf, tf, lf, instr)
-        # elif instr_opcode == "JUMPIFEQ":
-        #     i = execute_jumpifeq(gf, tf, lf, instr)
-        # elif instr_opcode == "JUMPIFNEQ":
-        #     i = execute_jumpifneq(gf, tf, lf, instr)
+        elif instr_opcode == "LABEL":
+            i += 1
+            continue
+        elif instr_opcode == "JUMP":
+            i = execute_jump(instr)
+        elif instr_opcode == "JUMPIFEQ":
+            i = execute_jumpifeq(gf, tf, lf, instr, i)
+        elif instr_opcode == "JUMPIFNEQ":
+            i = execute_jumpifneq(gf, tf, lf, instr, i)
         elif instr_opcode == "EXIT":
             execute_exit(gf, tf, lf, instr)
-        # elif instr_opcode == "DPRINT":
-        #     execute_dprint(gf, tf, lf, instr)
-        # elif instr_opcode == "BREAK":
-        #     execute_break(gf, tf, lf, instr)
+        elif instr_opcode == "DPRINT":
+            execute_dprint(gf, tf, lf, instr)
+        elif instr_opcode == "BREAK":
+            execute_break(gf, tf, lf)
         else:
             print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
         i += 1
