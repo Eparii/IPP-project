@@ -213,7 +213,7 @@ def get_label_index(name):
     i = 0
     while i < len(instructions_list):
         instr = instructions_list[i]
-        if instr.get_opcode() == "LABEL" and instr.get_argument(1).get_value() == name:
+        if instr.get_opcode().upper() == "LABEL" and instr.get_argument(1).get_value() == name:
             return i
         i += 1
     return None
