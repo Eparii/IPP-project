@@ -1,0 +1,57 @@
+body
+{
+    grid-template-columns: 1fr 1fr;
+    background-color: #d3d3d3;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+}
+table
+{
+    height: 30vh;
+    border-collapse: collapse;
+    width:100%;
+    text-align: center;
+    font-size: 40px;
+    border: 3px solid black;
+}
+td
+{
+    border-bottom: 1px solid black;
+    border-top: 1px solid black;
+    border-right: 1px solid black;
+    width: 50%;
+}
+tr:nth-child(3)
+{
+    color: green;
+}
+tr:nth-child(4)
+{
+    color: red;
+}
+tr:nth-child(4) td
+{
+    border-bottom: 3px solid black;
+}
+.tests_lists
+{
+    margin-top: 20px;
+    text-align: justify;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+.passed_list
+{
+    margin-right: 20px;
+}
+.tests_lists h2
+{
+    text-decoration: underline;
+    text-align: center;
+}
+.tests_lists p
+{
+    max-height: 50vh;
+    overflow-y: scroll;
+}

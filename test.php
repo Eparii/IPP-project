@@ -1,9 +1,9 @@
-<?php
+<?php include 'html_generator.php';
 
 const INPUT_FILE_OPENING_ERROR = 11;
 const WRONG_DIRECTORY_ERROR = 41;
 
-function scan_directory($dir)
+function scan_directory($dir) : array
 {
     $results= [];
     $files = scandir($dir);
@@ -12,7 +12,7 @@ function scan_directory($dir)
         $path = realpath("$dir/$file");
         if (preg_match("/.+\.src/", $file))
         {
-            array_push($results, $path);
+            $results[] = $path;
         }
     }
     return $results;
@@ -26,7 +26,7 @@ function scan_directory_recursive($dir, &$results)
         $path = realpath("$dir/$file");
         if (preg_match("/.+\.src/", $file))
         {
-            array_push($results, $path);
+            $results[] = $path;
         }
         else if (is_dir($path) && $file != "." && $file != "..")
         {
@@ -88,6 +88,7 @@ $all_tests_array = [];
 $failed_tests = 0;
 $failed_array = [];
 $passed_tests = 0;
+$passed_array = [];
 $return_code = 0;
 $output = null;
 $jexamPath="/home/Epari/projekty/IPP-project/jexamxml";
@@ -99,9 +100,15 @@ $parseOnlyArg=false;
 $intOnlyArg=false;
 $jexampathArg=false;
 $nocleanArg=false;
+$firstArg=true;
 
 foreach ($argv as $argument)
 {
+    if($firstArg)
+    {
+        $firstArg = false;
+        continue;
+    }
     if ($argument == "--help")
     {
         if ($argc != 2)
@@ -118,7 +125,7 @@ foreach ($argv as $argument)
     else if (preg_match("/--directory=.+/", $argument))
     {
         $directoryArg = true;
-        $directory_path = substr($argument, strpos($argument,"=") + 1);
+        $directory_path = substr($argument, strpos($argument, "=") + 1);
     }
     else if ($argument == "--recursive")
     {
@@ -148,11 +155,11 @@ foreach ($argv as $argument)
     {
         $nocleanArg = true;
     }
-//    else
-//    {
-//        echo ("unknown argument!\n");
-//        exit(10);
-//    }
+    else
+    {
+        echo("unknown argument!\n");
+        exit(10);
+    }
 }
 
 if (!is_dir("tmp"))
@@ -185,11 +192,12 @@ foreach ($all_tests_array as $src_file)
             if ($return_code == 0)
             {
                 $passed_tests++;
+                $passed_array[] = $src_file;
             }
             else
             {
                 $failed_tests++;
-                array_push($failed_array, $src_file);
+                $failed_array[] = $src_file;
             }
         }
         else
@@ -197,11 +205,12 @@ foreach ($all_tests_array as $src_file)
             if ($expected_return == $return_code)
             {
                 $passed_tests++;
+                $passed_array[] = $src_file;
             }
             else
             {
                 $failed_tests++;
-                array_push($failed_array, $src_file);
+                $failed_array[] = $src_file;
             }
         }
     }
@@ -214,11 +223,12 @@ foreach ($all_tests_array as $src_file)
             if ($return_code == 0)
             {
                 $passed_tests++;
+                $passed_array[] = $src_file;
             }
             else
             {
                 $failed_tests++;
-                array_push($failed_array, $src_file);
+                $failed_array[] = $src_file;
             }
         }
         else
@@ -226,21 +236,68 @@ foreach ($all_tests_array as $src_file)
             if ($expected_return == $return_code)
             {
                 $passed_tests++;
+                $passed_array[] = $src_file;
             }
             else
             {
                 $failed_tests++;
-                array_push($failed_array, $src_file);
+                $failed_array[] = $src_file;
+            }
+        }
+    }
+    else
+    {
+        $parser_output = preg_replace("/\.src/", "_parser.out", substr($src_file, strrpos($src_file, '/') + 1));
+        exec("php8.1 parse.php < $src_file > ./tmp/$parser_output", $output, $return_code);
+        if ($return_code == 0)
+        {
+            exec("python3 interpret.py --source=./tmp/$parser_output --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+            if ($return_code == 0)
+            {
+                exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);
+                if ($return_code == 0 and $expected_return == 0)
+                {
+                    $passed_tests++;
+                    $passed_array[] = $src_file;
+                }
+                else
+                {
+                    $failed_tests++;
+                    $failed_array[] = $src_file;
+                }
+            }
+            else
+            {
+                if ($expected_return == $return_code)
+                {
+                    $passed_tests++;
+                    $passed_array[] = $src_file;
+                }
+                else
+                {
+                    $failed_tests++;
+                    $failed_array[] = $src_file;
+                }
+            }
+        }
+        else
+        {
+            if ($expected_return == $return_code)
+            {
+                $passed_tests++;
+                $passed_array[] = $src_file;
+            }
+            else
+            {
+                $failed_tests++;
+                $failed_array[] = $src_file;
             }
         }
     }
 }
 
-
-printf("list of failed tests:\n");
-print_r($failed_array);
-printf("failed tests = %d\npassed tests = %d\n", $failed_tests, $passed_tests);
-
+$all_tests_num = sizeof($all_tests_array);
+generate_HTML_file($failed_array, $failed_tests, $passed_array, $passed_tests, $all_tests_num);
 if (!$nocleanArg)
 {
     delete_tmp_files();

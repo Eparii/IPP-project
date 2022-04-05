@@ -20,7 +20,7 @@
 	<instruction order="7" opcode="GETCHAR">
 		<arg1 type="var">GF@result</arg1>
 		<arg2 type="var">GF@var</arg2>
-		<arg3 type="int">2</arg3>
+		<arg3 type="var">GF@var2</arg3>
 	</instruction>
 	<instruction order="8" opcode="WRITE">
         	<arg1 type="var">GF@result</arg1>

@@ -18,10 +18,10 @@
 	<instruction order="8" opcode="LABEL">
 	    <arg1 type="label">end</arg1>
 	</instruction>
-	<instruction order="8" opcode="LABEL">
+	<instruction order="9" opcode="LABEL">
 	    <arg1 type="label">end</arg1>
 	</instruction>
-	<instruction order="9" opcode="WRITE">
+	<instruction order="10" opcode="WRITE">
         	<arg1 type="var">GF@var2</arg1>
     </instruction>
 </program>
