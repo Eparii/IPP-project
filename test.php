@@ -1,6 +1,8 @@
 <?php include 'html_generator.php';
 
+const WRONG_ARGUMENTS_ERROR = 10;
 const INPUT_FILE_OPENING_ERROR = 11;
+const OUTPUT_FILE_OPENING_ERROR = 12;
 const WRONG_DIRECTORY_ERROR = 41;
 
 function scan_directory($dir) : array
@@ -91,7 +93,9 @@ $passed_tests = 0;
 $passed_array = [];
 $return_code = 0;
 $output = null;
-$jexamPath="/home/Epari/projekty/IPP-project/jexamxml";
+$jexamPath="/pub/courses/ipp/jexamxml";
+$parse_script="./parse.php";
+$int_script ="./interpret.py";
 $recursiveArg=false;
 $directoryArg=false;
 $parseScriptArg=false;
@@ -113,12 +117,30 @@ foreach ($argv as $argument)
     {
         if ($argc != 2)
         {
-            echo("You can't use '--help' with another argument!\n");
-            exit(1);
+            fprintf(STDERR,"Can't use help with another argument!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
         }
         else
         {
-            echo("help\n");
+            printf ("Použití: php8.1 test.php [parametry] < input_file
+            
+    parametry:
+    --help - vypíše nápovědu, nelze kombinovat s jinými parametry
+    --directory=path - testy bude hledat v zadaném adresáři
+    --recursive - testy bude hledat nejen v zadaném adresáři, ale i rekurzivně ve všech jeho 
+    podadresářích
+    --parse-script=file - kde file je soubor se skriptem v PHP 8.1 pro parser
+    --int-script=file - kde file je soubor se skriptem v Python 3.8 pro interpret 
+    --parse-only - bude testován pouze parser
+    --int-only bude testován pouze interpret
+    --jexampath=path cesta k adresáři obsahující soubor jexamxml.jar s JAR balíčkem s ná-
+    strojem A7Soft JExamXML a soubor s konfigurací jménem options
+    
+    chybové kódy: 
+    10 - špatné argumenty, povolen je pouze samostatný argument --help
+    11 - chyba při otevírání vstupních souborů (např. neexistence, nedostatečné oprávnění)
+    12 - chyba při otevření výstupních souborů pro zápis(nedostatečné oprávnění)
+    41 - jiná lexikální nebo syntaktická chyba zdrojového kódu zapsaného v IPPcode22\n");
             exit(0);
         }
     }
@@ -133,22 +155,65 @@ foreach ($argv as $argument)
     }
     else if (preg_match("/--parse-script=.+\.php/", $argument))
     {
+        if ($intOnlyArg)
+        {
+            fprintf(STDERR,"Can't use --parse-script with --int-only!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
+        }
         $parseScriptArg = true;
+        $parse_script = substr($argument, strpos($argument, "=") + 1);
+        if (!is_readable($parse_script))
+        {
+            printf("Couldn't find the int script!\n");
+            exit(WRONG_DIRECTORY_ERROR);
+        }
     }
     else if (preg_match("/--int-script=.+\.py/", $argument))
     {
+        if ($parseOnlyArg)
+        {
+            fprintf(STDERR,"Can't use --parse-only with --int-script!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
+        }
         $intScriptArg = true;
+        $int_script = substr($argument, strpos($argument, "=") + 1);
+        if (!is_readable($int_script))
+        {
+            printf("Couldn't find the int script!\n");
+            exit(WRONG_DIRECTORY_ERROR);
+        }
     }
     else if ($argument == "--parse-only")
     {
+        if ($intOnlyArg || $intScriptArg)
+        {
+            fprintf(STDERR,"Can't use --parse-only with --int-only or --int-script!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
+        }
         $parseOnlyArg = true;
     }
     else if ($argument == "--int-only")
     {
+        if ($parseOnlyArg || $jexampathArg || $parseScriptArg)
+        {
+            fprintf(STDERR,"Can't use --int-only with --jexampath, parse-only or --parse-script!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
+        }
         $intOnlyArg = true;
     }
     else if (preg_match("/--jexampath=.+/", $argument))
     {
+        if ($intOnlyArg)
+        {
+            fprintf(STDERR,"Can't use --int-only with --jexampath!\n");
+            exit(WRONG_ARGUMENTS_ERROR);
+        }
+        $jexampathArg = substr($argument, strpos($argument, "=") + 1);
+        if (!is_readable($jexamPath))
+        {
+            printf("Couldn't reach the jexam path!\n");
+            exit(WRONG_DIRECTORY_ERROR);
+        }
         $jexampathArg = true;
     }
     else if ($argument == "--noclean")
@@ -165,6 +230,11 @@ foreach ($argv as $argument)
 if (!is_dir("tmp"))
 {
     mkdir("tmp");
+}
+if (!is_writable("./tmp"))
+{
+    printf("Couldn't write output files!\n");
+    exit(OUTPUT_FILE_OPENING_ERROR);
 }
 if (!is_dir($directory_path) || !is_readable($directory_path))
 {
@@ -185,7 +255,7 @@ foreach ($all_tests_array as $src_file)
     fclose($return_code_file);
     if ($parseOnlyArg)
     {
-        exec("php8.1 parse.php < $src_file > ./tmp/$test_output_name", $output, $return_code);
+        exec("php8.1 $parse_script < $src_file > ./tmp/$test_output_name", $output, $return_code);
         if ($expected_return == 0)
         {
             exec("java -jar $jexamPath/jexamxml.jar ./tmp/$test_output_name $output_file delta.xml $jexamPath/options", $output, $return_code);
@@ -216,7 +286,7 @@ foreach ($all_tests_array as $src_file)
     }
     else if ($intOnlyArg)
     {
-        exec("python3 interpret.py --source=$src_file --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+        exec("python3 $int_script --source=$src_file --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
         if ($expected_return == 0)
         {
             exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);
@@ -248,10 +318,10 @@ foreach ($all_tests_array as $src_file)
     else
     {
         $parser_output = preg_replace("/\.src/", "_parser.out", substr($src_file, strrpos($src_file, '/') + 1));
-        exec("php8.1 parse.php < $src_file > ./tmp/$parser_output", $output, $return_code);
+        exec("php8.1 $parse_script < $src_file > ./tmp/$parser_output", $output, $return_code);
         if ($return_code == 0)
         {
-            exec("python3 interpret.py --source=./tmp/$parser_output --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+            exec("python3 $int_script --source=./tmp/$parser_output --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
             if ($return_code == 0)
             {
                 exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);

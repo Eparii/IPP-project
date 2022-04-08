@@ -1,6 +1,7 @@
 import sys
 import re
 import xml.etree.ElementTree as ET
+import operator
 
 instructions_list = []
 labels_list = []
@@ -158,8 +159,8 @@ def check_args_and_get_file_paths():
             source_path = arg[arg.find("=") + 1:]
             source_arg = 1
         # napoveda muze byt vypsana pouze pokud je to jediny argument
-        elif re.match("--help", arg) and len(sys.argv) == 0:
-            continue
+        elif re.match("--help", arg) and len(sys.argv) == 2:
+            print_help()
         else:
             print_error(WRONG_ARGUMENTS_ERROR)
 
@@ -174,14 +175,17 @@ def check_args_and_get_file_paths():
 
 # funkce slouzici pro vypis napovedy
 def print_help():
-    print("Usage: python3 interpret.py [options]\n"
-          "options:\n"
+    print("Použití: python3 interpret.py [parametry]\n"
+          "parametry:\n"
           "\t--help\n"
           "\t--source=file\n"
           "\t--input=file\n"
+          "je nutno zadat alespoň jeden z parametrů --source=file "
+          "a --input=file, druhý bude načten ze standardního vstupu\n\n"
           "error return codes:\n"
           "\t31 - incorrect XML formatting\n"
-          "\t32 - unexpected XML structure\n")
+          "\t32 - unexpected XML structure")
+    exit(0)
 
 
 # funkce slouzici k nacteni XML
@@ -190,6 +194,8 @@ def load_xml(src_file):
         tmp_tree = ET.parse(src_file)
     except ET.ParseError:
         print_error(WRONG_XML_FORMAT_ERROR)
+    except FileNotFoundError:
+        print_error(INPUT_FILE_OPENING_ERROR)
     else:
         tmp_root = tmp_tree.getroot()
         return tmp_tree, tmp_root
@@ -246,6 +252,121 @@ def search_variable(gf, tf, lf, var_frame, name):
         return lf.search_var(name)
 
 
+def get_index_check_label(instr):
+    arg1 = instr.get_argument(1)
+    if arg1.get_type() != "label":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    index = get_label_index(instr.get_argument(1).get_value())
+    if index is None:
+        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    return index
+
+
+# funkce slouzici na kontrolu existence promenne a pripadne jejiho spravneho typu
+def get_and_check_var(instr, arg_num, gf, tf, lf, check_type=0, checking_type=None):
+    arg = instr.get_argument(arg_num)
+    if arg.get_type() != "var":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    var = search_variable(gf, tf, lf, arg.get_frame(), arg.get_value())
+    if var is None:
+        print_error(UNDEFINED_VARIABLE_ERROR)
+    if check_type:
+        if var.get_type() == "":
+            print_error(MISSING_VALUE_ERROR)
+        if var.get_type() != checking_type:
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+    return var
+
+
+def get_ord(var, string, position):
+    if position.get_type() != "int":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    if position.get_value() < 0:
+        print_error(WRONG_STRING_WORKING_ERROR)
+    try:
+        var.edit_value(ord(string.get_value()[int(position.get_value())]), "int")
+    except IndexError:
+        print_error(WRONG_STRING_WORKING_ERROR)
+
+
+def check_last_arg_and_get_result(op, var, first_num, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        try:
+            var.edit_value(op(first_num.get_value(), arg3.get_value()), "int")
+        except ZeroDivisionError:
+            print_error(WRONG_OPERAND_VALUE_ERROR)
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+        try:
+            var.edit_value(op(first_num.get_value(), var2.get_value()), "int")
+        except ZeroDivisionError:
+            print_error(WRONG_OPERAND_VALUE_ERROR)
+
+
+def execute_arithmetic_operation(op, instr, gf, tf, lf):
+    var = get_and_check_var(instr, 1, gf, tf, lf)
+    arg2 = instr.get_argument(2)
+    if arg2.get_type() != "var":
+        if arg2.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        arg3 = instr.get_argument(3)
+        check_last_arg_and_get_result(op, var, arg2, arg3, instr, gf, tf, lf)
+    else:
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
+        arg3 = instr.get_argument(3)
+        check_last_arg_and_get_result(op, var, var2, arg3, instr, gf, tf, lf)
+
+
+def check_comparing_values(op, first_value, second_value):
+    if op == operator.eq:
+        if first_value.get_type() != second_value.get_type() and \
+                first_value.get_type() != "nil" and second_value.get_type() != "nil":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        else:
+            if first_value.get_type() != second_value.get_type() or\
+                    first_value.get_type() == "nil" or second_value.get_type() == "nil":
+                print_error(WRONG_OPERAND_TYPE_ERROR)
+
+
+def check_values_and_compare(var, first_value, arg3, op, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        check_comparing_values(op, first_value, arg3)
+        if op(first_value.get_value(), arg3.get_value()):
+            var.edit_value("true", "bool")
+        else:
+            var.edit_value("false", "bool")
+    else:
+        var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
+        if var3 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        if var3.get_type() == "":
+            print_error(MISSING_VALUE_ERROR)
+        check_comparing_values(op, first_value, var3)
+        if op(first_value.get_value(), var3.get_value()):
+            var.edit_value("true", "bool")
+        else:
+            var.edit_value("false", "bool")
+
+
+def execute_comparison_operation(op, instr, gf, tf, lf):
+    var = get_and_check_var(instr, 1, gf, tf, lf)
+    arg2 = instr.get_argument(2)
+    if arg2.get_type() != "var":
+        arg3 = instr.get_argument(3)
+        check_values_and_compare(var, arg2, arg3, op, instr, gf, tf, lf)
+    else:
+        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
+        if var2 is None:
+            print_error(UNDEFINED_VARIABLE_ERROR)
+        # jedna se o nedefinovanou promennou
+        if var2.get_type() == "":
+            print_error(MISSING_VALUE_ERROR)
+        arg3 = instr.get_argument(3)
+        check_values_and_compare(var, var2, arg3, op, instr, gf, tf, lf)
+
+
 # funkce slouzici na ulozeni instrukci do seznamu
 def save_instructions(tree_root):
     for instr in tree_root:
@@ -282,10 +403,10 @@ def save_instructions(tree_root):
 
 def execute_move(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
-    arg2 = instr.get_argument(2)
     if arg1.get_type() == "var":
         var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
         if var is not None:
+            arg2 = instr.get_argument(2)
             if arg2.get_type() != "var":
                 var.edit_value(arg2.get_value(), arg2.get_type())
             else:
@@ -353,8 +474,6 @@ def execute_pushs(gf, tf, lf, instr):
         type_stack.append(var.get_type())
 
 
-
-
 def execute_pops(gf, tf, lf, instr):
     arg = instr.get_argument(1)
     if arg.get_type() != "var":
@@ -370,13 +489,7 @@ def execute_pops(gf, tf, lf, instr):
 
 
 def execute_int2char(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    # jedna se o nedefinovanou promennou
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "int":
@@ -386,427 +499,15 @@ def execute_int2char(gf, tf, lf, instr):
         except ValueError:
             print_error(WRONG_STRING_WORKING_ERROR)
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
         try:
             var.edit_value(chr(var2.get_value()), "string")
         except ValueError:
             print_error(WRONG_STRING_WORKING_ERROR)
 
 
-def execute_add(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        if arg2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() + arg3.get_value(), "int")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() + var2.get_value(), "int")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() + arg3.get_value(), "int")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() + var3.get_value(), "int")
-
-
-def execute_sub(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        if arg2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() - arg3.get_value(), "int")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() - var2.get_value(), "int")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() - arg3.get_value(), "int")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() - var3.get_value(), "int")
-
-
-def execute_mul(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        if arg2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() * arg3.get_value(), "int")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(int(arg2.get_value()) * int(var2.get_value()), "int")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() * arg3.get_value(), "int")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() * var3.get_value(), "int")
-
-
-def execute_idiv(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        if arg2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            try:
-                var.edit_value(arg2.get_value() // arg3.get_value(), "int")
-            except ZeroDivisionError:
-                print_error(WRONG_OPERAND_VALUE_ERROR)
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            try:
-                var.edit_value(arg2.get_value() // var2.get_value(), "int")
-            except ZeroDivisionError:
-                print_error(WRONG_OPERAND_VALUE_ERROR)
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            try:
-                var.edit_value(var2.get_value() // arg3.get_value(), "int")
-            except ZeroDivisionError:
-                print_error(WRONG_OPERAND_VALUE_ERROR)
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            try:
-                var.edit_value(var2.get_value() // var3.get_value(), "int")
-            except ZeroDivisionError:
-                print_error(WRONG_OPERAND_VALUE_ERROR)
-
-
-def execute_gt(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type() or arg2.get_type() == "nil" or arg3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() > arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != arg2.get_type() or var2.get_type() == "nil" or arg2.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() > var2.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type() or var2.get_type() == "nil" or arg3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() > arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != var3.get_type() or var2.get_type() == "nil" or var3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() > var3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-
-
-def execute_lt(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type() or arg2.get_type() == "nil" or arg3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() < arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != arg2.get_type() or var2.get_type() == "nil" or arg2.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() < var2.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type() or var2.get_type() == "nil" or arg3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() < arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != var3.get_type() or var2.get_type() == "nil" or var3.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() < var3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-
-
-def execute_eq(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    arg2 = instr.get_argument(2)
-    if arg2.get_type() != "var":
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg2.get_type() != arg3.get_type() and arg2.get_type() != "nil" and arg3.get_type() != "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != arg2.get_type() and var2.get_type() != "nil" and arg2.get_type() != "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == var2.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-    else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if var2.get_type() != arg3.get_type() and var2.get_type() != "nil" and arg3.get_type() != "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() == arg3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != var3.get_type() and var2.get_type() != "nil" and var3.get_type() != "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() == var3.get_value():
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-
-
 def execute_read(file, gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "type" or arg2.get_type() == "nil":
         print_error(WRONG_OPERAND_TYPE_ERROR)
@@ -835,12 +536,7 @@ def execute_read(file, gf, tf, lf, instr):
 
 
 def execute_and(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "bool":
@@ -854,27 +550,13 @@ def execute_and(gf, tf, lf, instr):
             else:
                 var.edit_value("false", "bool")
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
             if arg2.get_value() == "true" and var2.get_value() == "true":
                 var.edit_value("true", "bool")
             else:
                 var.edit_value("false", "bool")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "bool":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
             if arg3.get_type() != "bool":
@@ -884,14 +566,7 @@ def execute_and(gf, tf, lf, instr):
             else:
                 var.edit_value("false", "bool")
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
             if var2.get_value() == "true" and var3.get_value() == "true":
                 var.edit_value("true", "bool")
             else:
@@ -899,12 +574,7 @@ def execute_and(gf, tf, lf, instr):
 
 
 def execute_or(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "bool":
@@ -918,27 +588,13 @@ def execute_or(gf, tf, lf, instr):
             else:
                 var.edit_value("false", "bool")
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
             if arg2.get_value() == "true" or var2.get_value() == "true":
                 var.edit_value("true", "bool")
             else:
                 var.edit_value("false", "bool")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "bool":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
             if arg3.get_type() != "bool":
@@ -948,14 +604,7 @@ def execute_or(gf, tf, lf, instr):
             else:
                 var.edit_value("false", "bool")
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
             if var2.get_value() == "true" or var3.get_value() == "true":
                 var.edit_value("true", "bool")
             else:
@@ -963,12 +612,7 @@ def execute_or(gf, tf, lf, instr):
 
 
 def execute_not(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "bool":
@@ -978,14 +622,7 @@ def execute_not(gf, tf, lf, instr):
         else:
             var.edit_value("true", "bool")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "bool":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
         if var2.get_value() == "true":
             var.edit_value("false", "bool")
         else:
@@ -993,36 +630,19 @@ def execute_not(gf, tf, lf, instr):
 
 
 def execute_strlen(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "string":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         var.edit_value(len(arg2.get_value()), "int")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "string":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
         var.edit_value(len(var2.get_value()), "int")
 
 
 def execute_concat(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "string":
@@ -1033,48 +653,22 @@ def execute_concat(gf, tf, lf, instr):
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             var.edit_value(arg2.get_value() + arg3.get_value(), "string")
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
             var.edit_value(arg2.get_value() + var2.get_value(), "string")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "string":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
             if arg3.get_type() != "string":
                 print_error(WRONG_OPERAND_TYPE_ERROR)
             var.edit_value(var2.get_value() + arg3.get_value(), "string")
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
             var.edit_value(var2.get_value() + var3.get_value(), "string")
 
 
 def execute_type(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         var.edit_value(arg2.get_type(), "string")
@@ -1094,14 +688,7 @@ def execute_exit(gf, tf, lf, instr):
             print_error(WRONG_OPERAND_VALUE_ERROR)
         exit(int(arg1.get_value()))
     else:
-        var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-        if var is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var = get_and_check_var(instr, 1, gf, tf, lf, check_type=1, checking_type="int")
         if int(var.get_value()) > 49 or int(var.get_value()) < 0:
             print_error(WRONG_OPERAND_VALUE_ERROR)
         exit(int(var.get_value()))
@@ -1122,84 +709,29 @@ def execute_dprint(gf, tf, lf, instr):
 
 
 def execute_stri2int(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "string":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(ord(arg2.get_value()[int(arg3.get_value())]), "int")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+            get_ord(var, arg2, arg3)
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(ord(arg2.get_value()[int(var2.get_value())]), "int")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+            get_ord(var, arg2, var2)
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "string":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(ord(var2.get_value()[int(arg3.get_value())]), "int")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+            get_ord(var, var2, arg3)
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var3.get_value() < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(ord(var2.get_value()[int(var3.get_value())]), "int")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+            get_ord(var, var2, var3)
 
 
 def execute_getchar(gf, tf, lf, instr):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "var":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "string":
@@ -1215,14 +747,7 @@ def execute_getchar(gf, tf, lf, instr):
             except IndexError:
                 print_error(WRONG_STRING_WORKING_ERROR)
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
             if int(var2.get_value()) < 0:
                 print_error(WRONG_STRING_WORKING_ERROR)
             try:
@@ -1230,14 +755,7 @@ def execute_getchar(gf, tf, lf, instr):
             except IndexError:
                 print_error(WRONG_STRING_WORKING_ERROR)
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "string":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
             if arg3.get_type() != "int":
@@ -1249,14 +767,7 @@ def execute_getchar(gf, tf, lf, instr):
             except IndexError:
                 print_error(WRONG_STRING_WORKING_ERROR)
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
             if int(var3.get_value()) < 0:
                 print_error(WRONG_STRING_WORKING_ERROR)
             try:
@@ -1269,14 +780,7 @@ def execute_setchar(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "var":
         print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = search_variable(gf, tf, lf, arg1.get_frame(), arg1.get_value())
-    if var is None:
-        print_error(UNDEFINED_VARIABLE_ERROR)
-    # jedna se o nedefinovanou promennou
-    if var.get_type() == "":
-        print_error(MISSING_VALUE_ERROR)
-    if var.get_type() != "string":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
+    var = get_and_check_var(instr, 1, gf, tf, lf, check_type=1, checking_type="string")
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "int":
@@ -1293,28 +797,14 @@ def execute_setchar(gf, tf, lf, instr):
                 var.get_value()[:arg2.get_value()] + arg3.get_value()[0] + var.get_value()[arg2.get_value() + 1:],
                 "string")
         else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
             if var2.get_value() == "":
                 print_error(WRONG_STRING_WORKING_ERROR)
             var.edit_value(
                 var.get_value()[:arg2.get_value()] + var2.get_value()[0] + var.get_value()[arg2.get_value() + 1:],
                 "string")
     else:
-        var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
-        if var2 is None:
-            print_error(UNDEFINED_VARIABLE_ERROR)
-        # jedna se o nedefinovanou promennou
-        if var2.get_type() == "":
-            print_error(MISSING_VALUE_ERROR)
-        if var2.get_type() != "int":
-            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
         if int(var2.get_value()) < 0 or int(var2.get_value()) > len(var.get_value()) - 1:
             print_error(WRONG_STRING_WORKING_ERROR)
         arg3 = instr.get_argument(3)
@@ -1327,14 +817,7 @@ def execute_setchar(gf, tf, lf, instr):
                 var.get_value()[:var2.get_value()] + arg3.get_value()[0] + var.get_value()[var2.get_value() + 1:],
                 "string")
         else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
             if var3.get_value() == "":
                 print_error(WRONG_STRING_WORKING_ERROR)
             var.edit_value(
@@ -1350,12 +833,7 @@ def execute_jump(instr):
 
 
 def execute_jumpifeq(gf, tf, lf, instr, i):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "label":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    index = get_label_index(instr.get_argument(1).get_value())
-    if index is None:
-        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    index = get_index_check_label(instr)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
@@ -1403,12 +881,7 @@ def execute_jumpifeq(gf, tf, lf, instr, i):
 
 
 def execute_jumpifneq(gf, tf, lf, instr, i):
-    arg1 = instr.get_argument(1)
-    if arg1.get_type() != "label":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    index = get_label_index(instr.get_argument(1).get_value())
-    if index is None:
-        print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
+    index = get_index_check_label(instr)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
@@ -1498,7 +971,11 @@ def execute_popframe():
 
 def execute_instructions(input_path):
     global tf_defined
-    file = open(input_path, 'rb')
+    file = None
+    try:
+        file = open(input_path, 'rb')
+    except FileNotFoundError:
+        print_error(INPUT_FILE_OPENING_ERROR)
     gf = lf = tf = frame()
     i = 0
     while i < len(instructions_list):
@@ -1513,11 +990,11 @@ def execute_instructions(input_path):
         elif instr_opcode == "PUSHFRAME":
             tf_defined = execute_pushframe(tf_defined, tf)
             if len(lf_stack) > 0:
-                lf = lf_stack[len(lf_stack)-1]
+                lf = lf_stack[len(lf_stack) - 1]
         elif instr_opcode == "POPFRAME":
             tf, tf_defined = execute_popframe()
             if len(lf_stack) > 0:
-                lf = lf_stack[len(lf_stack)-1]
+                lf = lf_stack[len(lf_stack) - 1]
         elif instr_opcode == "DEFVAR":
             execute_defvar(gf, tf, lf, instr)
         elif instr_opcode == "CALL":
@@ -1529,19 +1006,19 @@ def execute_instructions(input_path):
         elif instr_opcode == "POPS":
             execute_pops(gf, tf, lf, instr)
         elif instr_opcode == "ADD":
-            execute_add(gf, tf, lf, instr)
+            execute_arithmetic_operation(operator.add, instr, gf, tf, lf)
         elif instr_opcode == "SUB":
-            execute_sub(gf, tf, lf, instr)
+            execute_arithmetic_operation(operator.sub, instr, gf, tf, lf)
         elif instr_opcode == "MUL":
-            execute_mul(gf, tf, lf, instr)
+            execute_arithmetic_operation(operator.mul, instr, gf, tf, lf)
         elif instr_opcode == "IDIV":
-            execute_idiv(gf, tf, lf, instr)
+            execute_arithmetic_operation(operator.floordiv, instr, gf, tf, lf)
         elif instr_opcode == "LT":
-            execute_lt(gf, tf, lf, instr)
+            execute_comparison_operation(operator.lt, instr, gf, tf, lf)
         elif instr_opcode == "GT":
-            execute_gt(gf, tf, lf, instr)
+            execute_comparison_operation(operator.gt, instr, gf, tf, lf)
         elif instr_opcode == "EQ":
-            execute_eq(gf, tf, lf, instr)
+            execute_comparison_operation(operator.eq, instr, gf, tf, lf)
         elif instr_opcode == "AND":
             execute_and(gf, tf, lf, instr)
         elif instr_opcode == "OR":
@@ -1588,9 +1065,6 @@ def execute_instructions(input_path):
 
 if __name__ == '__main__':
     source_file, input_file = check_args_and_get_file_paths()
-    if '--help' in sys.argv:
-        print_help()
-
     tree, root = load_xml(source_file)
     check_xml(root)
     save_instructions(root)

@@ -205,7 +205,7 @@ if ($argc == 2)
 {
     if ($argv[1] == "--help")
     {
-        printf ("Použití: parser.php [--help] < input_file
+        printf ("Použití: php8.1 parser.php [--help] < input_file
     chybové kódy:
     10 - špatné argumenty, povolen je pouze samostatný argument --help
     21 - chybná nebo chybějící hlavička ve zdrojovém kódu zapsaném v IPPcode22

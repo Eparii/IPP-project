@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+<program language="IPPcode22">
+	<instruction order="1" opcode="CALL">
+		<arg1 type="label">function</arg1>
+	</instruction>
+	<instruction order="2" opcode="RETURN">
+	</instruction>
+	<instruction order="3" opcode="JUMP">
+		<arg1 type="label">end</arg1>
+	</instruction>
+	<instruction order="4" opcode="LABEL">
+		<arg1 type="label">function</arg1>
+	</instruction>
+	<instruction order="5" opcode="RETURN">
+	</instruction>
+	<instruction order="6" opcode="LABEL">
+		<arg1 type="label">end</arg1>
+	</instruction>
+</program>
