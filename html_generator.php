@@ -12,7 +12,7 @@ function HTML_generate_start()
 }
 function HTML_generate_table($failed_tests_num, $passed_tests_num, $all_tests_num)
 {
-    $successful_percentage = $all_tests_num/$passed_tests_num * 100;
+    $successful_percentage = round($passed_tests_num/$all_tests_num * 100, 2);
     print ("\t<table>
         <tr>
             <th colspan='2'>Test stats</th>
@@ -71,7 +71,7 @@ function generate_HTML_file($failed_array, $failed_tests_num, $passed_array, $pa
 {
     for ($i = 0; $i < 50; $i++)
     {
-        $failed_array[] = "dsadsadsadsadsadsadsadsadsadsadsadsa";
+        $failed_array[] = "failed_test";
     }
     HTML_generate_start();
     HTML_generate_table($failed_tests_num, $passed_tests_num, $all_tests_num);

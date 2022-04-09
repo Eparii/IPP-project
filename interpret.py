@@ -6,10 +6,10 @@ import operator
 instructions_list = []
 labels_list = []
 lf_stack = []
-tf_defined = 0
 value_stack = []
 type_stack = []
 call_stack = []
+tf_defined = 0
 
 
 class argument:
@@ -36,6 +36,7 @@ class argument:
         self.value = value
 
 
+# trida slouzici na ukladani a praci s jednotlivymi instrukcemi
 class instruction:
     def __init__(self, opcode, order, args_num):
         self.opcode = opcode
@@ -46,6 +47,7 @@ class instruction:
     def add_argument(self, arg_type, arg_number, value):
         self.args.append(argument(arg_type, arg_number, value))
 
+    # vrati argument se zadanym poradim
     def get_argument(self, order):
         for arg in self.args:
             if arg.order == order:
@@ -58,6 +60,7 @@ class instruction:
         return self.order
 
 
+# trida slouzici pro ukladad
 class variable:
     def __init__(self, var_name, var_type, var_value):
         self.name = var_name
@@ -73,6 +76,7 @@ class variable:
     def get_value(self):
         return self.value
 
+    # upravi a zkontroluje hodnotu ulozenou v promenne
     def edit_value(self, value, value_type):
         if value_type == "int":
             try:
@@ -86,15 +90,19 @@ class variable:
         self.type = value_type
 
 
+# trida slouzici na ukladani do ramcu a naslednou praci s nimi
 class frame:
     def __init__(self):
         self.variables = []
 
+# zkontroluje a ulozi promennou do ramce
     def add_var(self, var_name, var_type, var_value):
+        # zkontroluje, zda promenna jiz v ramci neexistuje
         if self.search_var(var_name) is not None:
             print_error(UNDEFINED_LABEL_OR_REDEFINITION_ERROR)
         self.variables.append(variable(var_name, var_type, var_value))
 
+    # vyhleda promennou v ramci, pokud neexistuje vraci None
     def search_var(self, name):
         for var in self.variables:
             if var.get_name() == name:
@@ -163,9 +171,10 @@ def check_args_and_get_file_paths():
             print_help()
         else:
             print_error(WRONG_ARGUMENTS_ERROR)
-
+    # musi byt zadan alespon jeden argument
     if source_arg == 0 and input_arg == 0:
         print_error(WRONG_ARGUMENTS_ERROR)
+    # pokud neni zadan jeden argument, bere stdin
     elif source_arg == 0:
         source_path = sys.stdin
     elif input_arg == 0:
@@ -206,7 +215,7 @@ def check_xml(tree_root):
     if tree_root.tag != 'program':
         print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
 
-
+# funkce slouzici k vyhledani instrukce
 def search_instruction(order):
     if order <= 0:
         print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
@@ -252,6 +261,7 @@ def search_variable(gf, tf, lf, var_frame, name):
         return lf.search_var(name)
 
 
+# funkce, ktera vrati index labelu a zaroven zkontroluje spravnost
 def get_index_check_label(instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "label":
@@ -277,7 +287,8 @@ def get_and_check_var(instr, arg_num, gf, tf, lf, check_type=0, checking_type=No
             print_error(WRONG_OPERAND_TYPE_ERROR)
     return var
 
-
+# pomocna funkce pro stri2int, kontroluje spravnost stringu
+# a pozice a do var ulozi ord
 def get_ord(var, string, position):
     if position.get_type() != "int":
         print_error(WRONG_OPERAND_TYPE_ERROR)
@@ -289,6 +300,8 @@ def get_ord(var, string, position):
         print_error(WRONG_STRING_WORKING_ERROR)
 
 
+# pomocna funkce pro aritmeticke operace, zkontroluje
+# spravnost posledniho argumentu a vykona pozadovanou operaci
 def check_last_arg_and_get_result(op, var, first_num, arg3, instr, gf, tf, lf):
     if arg3.get_type() != "var":
         if arg3.get_type() != "int":
@@ -305,6 +318,9 @@ def check_last_arg_and_get_result(op, var, first_num, arg3, instr, gf, tf, lf):
             print_error(WRONG_OPERAND_VALUE_ERROR)
 
 
+# spolecna funkce pro vsechny aritmeticke operace,
+# zkontroluje spravnost vsech argumentu a pote zavola funkci
+# "check_last_arg_and_get_result", ktera vrati vysledek
 def execute_arithmetic_operation(op, instr, gf, tf, lf):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -401,6 +417,7 @@ def save_instructions(tree_root):
     instructions_list.sort(key=lambda x: x.order)
 
 
+# funkce, ktera provede instrukci MOVE
 def execute_move(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() == "var":
