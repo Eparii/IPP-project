@@ -69,10 +69,6 @@ function HTML_generate_end()
 
 function generate_HTML_file($failed_array, $failed_tests_num, $passed_array, $passed_tests_num, $all_tests_num)
 {
-    for ($i = 0; $i < 50; $i++)
-    {
-        $failed_array[] = "failed_test";
-    }
     HTML_generate_start();
     HTML_generate_table($failed_tests_num, $passed_tests_num, $all_tests_num);
     HTML_generate_tests_lists($failed_array, $passed_array);

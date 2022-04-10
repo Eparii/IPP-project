@@ -12,15 +12,18 @@ call_stack = []
 tf_defined = 0
 
 
+# trida slouzici na ukladani argumentu do instrukce a naslednou praci s nimi
 class argument:
     def __init__(self, arg_order: int, arg_type, arg_value):
         self.type = arg_type
         self.order: int = arg_order
         self.value = arg_value
 
+    # vrati typ ramce (LF/GF/TF)
     def get_frame(self):
         return re.sub(r"@.+", "", self.value)
 
+    # vrati nazev promenne nebo hodnotu konstanty
     def get_value(self):
         if self.type == "var":
             return re.sub(r".+@", "", self.value)
@@ -95,7 +98,7 @@ class frame:
     def __init__(self):
         self.variables = []
 
-# zkontroluje a ulozi promennou do ramce
+    # zkontroluje a ulozi promennou do ramce
     def add_var(self, var_name, var_type, var_value):
         # zkontroluje, zda promenna jiz v ramci neexistuje
         if self.search_var(var_name) is not None:
@@ -215,6 +218,7 @@ def check_xml(tree_root):
     if tree_root.tag != 'program':
         print_error(UNEXPECTED_XML_STRUCTURE_ERROR)
 
+
 # funkce slouzici k vyhledani instrukce
 def search_instruction(order):
     if order <= 0:
@@ -273,31 +277,20 @@ def get_index_check_label(instr):
 
 
 # funkce slouzici na kontrolu existence promenne a pripadne jejiho spravneho typu
-def get_and_check_var(instr, arg_num, gf, tf, lf, check_type=0, checking_type=None):
+def get_and_check_var(instr, arg_num, gf, tf, lf, check_empty=0, checking_type=None):
     arg = instr.get_argument(arg_num)
     if arg.get_type() != "var":
         print_error(WRONG_OPERAND_TYPE_ERROR)
     var = search_variable(gf, tf, lf, arg.get_frame(), arg.get_value())
     if var is None:
         print_error(UNDEFINED_VARIABLE_ERROR)
-    if check_type:
+    if check_empty:
         if var.get_type() == "":
             print_error(MISSING_VALUE_ERROR)
+    if checking_type:
         if var.get_type() != checking_type:
             print_error(WRONG_OPERAND_TYPE_ERROR)
     return var
-
-# pomocna funkce pro stri2int, kontroluje spravnost stringu
-# a pozice a do var ulozi ord
-def get_ord(var, string, position):
-    if position.get_type() != "int":
-        print_error(WRONG_OPERAND_TYPE_ERROR)
-    if position.get_value() < 0:
-        print_error(WRONG_STRING_WORKING_ERROR)
-    try:
-        var.edit_value(ord(string.get_value()[int(position.get_value())]), "int")
-    except IndexError:
-        print_error(WRONG_STRING_WORKING_ERROR)
 
 
 # pomocna funkce pro aritmeticke operace, zkontroluje
@@ -311,7 +304,7 @@ def check_last_arg_and_get_result(op, var, first_num, arg3, instr, gf, tf, lf):
         except ZeroDivisionError:
             print_error(WRONG_OPERAND_VALUE_ERROR)
     else:
-        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="int")
         try:
             var.edit_value(op(first_num.get_value(), var2.get_value()), "int")
         except ZeroDivisionError:
@@ -330,23 +323,27 @@ def execute_arithmetic_operation(op, instr, gf, tf, lf):
         arg3 = instr.get_argument(3)
         check_last_arg_and_get_result(op, var, arg2, arg3, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="int")
         arg3 = instr.get_argument(3)
         check_last_arg_and_get_result(op, var, var2, arg3, instr, gf, tf, lf)
 
 
+# pomocna funkce pro "check_values_and_compare", ktera pouze zkontroluje,
+# zda se v operandech nachazi validni
 def check_comparing_values(op, first_value, second_value):
     if op == operator.eq:
         if first_value.get_type() != second_value.get_type() and \
                 first_value.get_type() != "nil" and second_value.get_type() != "nil":
             print_error(WRONG_OPERAND_TYPE_ERROR)
-        else:
-            if first_value.get_type() != second_value.get_type() or\
-                    first_value.get_type() == "nil" or second_value.get_type() == "nil":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
+    else:
+        if first_value.get_type() != second_value.get_type() or \
+                first_value.get_type() == "nil" or second_value.get_type() == "nil":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
 
 
-def check_values_and_compare(var, first_value, arg3, op, instr, gf, tf, lf):
+# pomocna funkce pro "execute_comparison_operation"
+# slouzi ke kontrole operandu a naslednemu ulozeni vysledku porovnani
+def check_values_and_compare(var, first_value, arg3, op, gf, tf, lf):
     if arg3.get_type() != "var":
         check_comparing_values(op, first_value, arg3)
         if op(first_value.get_value(), arg3.get_value()):
@@ -366,12 +363,13 @@ def check_values_and_compare(var, first_value, arg3, op, instr, gf, tf, lf):
             var.edit_value("false", "bool")
 
 
+# na zaklade prijateho operandu v "op" provede porovnani
 def execute_comparison_operation(op, instr, gf, tf, lf):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
-        check_values_and_compare(var, arg2, arg3, op, instr, gf, tf, lf)
+        check_values_and_compare(var, arg2, arg3, op, gf, tf, lf)
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
@@ -380,7 +378,7 @@ def execute_comparison_operation(op, instr, gf, tf, lf):
         if var2.get_type() == "":
             print_error(MISSING_VALUE_ERROR)
         arg3 = instr.get_argument(3)
-        check_values_and_compare(var, var2, arg3, op, instr, gf, tf, lf)
+        check_values_and_compare(var, var2, arg3, op, gf, tf, lf)
 
 
 # funkce slouzici na ulozeni instrukci do seznamu
@@ -440,6 +438,7 @@ def execute_move(gf, tf, lf, instr):
         print_error(WRONG_OPERAND_TYPE_ERROR)
 
 
+# funkce ktera provede instrukci defvar
 def execute_defvar(gf, tf, lf, instr):
     arg = instr.get_argument(1)
     if arg.get_type() == "var":
@@ -455,6 +454,7 @@ def execute_defvar(gf, tf, lf, instr):
             lf.add_var(arg.get_value(), "", "")
 
 
+# funkce ktera provede instrukci write
 def execute_write(gf, tf, lf, instr):
     arg = instr.get_argument(1)
     if arg.get_type() != "var":
@@ -476,6 +476,7 @@ def execute_write(gf, tf, lf, instr):
             print_error(UNDEFINED_VARIABLE_ERROR)
 
 
+# funkce ktera provede instrukci pushs
 def execute_pushs(gf, tf, lf, instr):
     arg = instr.get_argument(1)
     if arg.get_type() != "var":
@@ -491,6 +492,7 @@ def execute_pushs(gf, tf, lf, instr):
         type_stack.append(var.get_type())
 
 
+# funkce ktera provede instrukci pops
 def execute_pops(gf, tf, lf, instr):
     arg = instr.get_argument(1)
     if arg.get_type() != "var":
@@ -505,6 +507,7 @@ def execute_pops(gf, tf, lf, instr):
             print_error(MISSING_VALUE_ERROR)
 
 
+# funkce ktera provede instrukci int2char
 def execute_int2char(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -516,13 +519,14 @@ def execute_int2char(gf, tf, lf, instr):
         except ValueError:
             print_error(WRONG_STRING_WORKING_ERROR)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="int")
         try:
             var.edit_value(chr(var2.get_value()), "string")
         except ValueError:
             print_error(WRONG_STRING_WORKING_ERROR)
 
 
+# funkce ktera provede instrukci read
 def execute_read(file, gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -532,11 +536,16 @@ def execute_read(file, gf, tf, lf, instr):
     nextline = file.readline()
     line = line.rstrip().decode('utf-8')
     if not line:
-        if not nextline:
-            var.edit_value("nil", "nil")
-        else:
+        # pokud existuje pristi radek a pozadovany typ je string,
+        # ulozi do promenne prazdny retezec
+        if nextline and arg2.get_value() == "string":
             var.edit_value("", "string")
+        # pokud neexistuje pristi radek, ulozi do promenne nil@nil
+        else:
+            var.edit_value("nil", "nil")
     else:
+        # do hodnoty bool ulozi true pouze pokud je v souboru radek true,
+        # jinak false
         if arg2.get_value() == "bool":
             if line.upper() == "TRUE":
                 var.edit_value("true", "bool")
@@ -552,6 +561,25 @@ def execute_read(file, gf, tf, lf, instr):
     file.seek(-len(nextline), 1)
 
 
+# pomocna funkce pro "execute_and" ktera slouzi ke kontrole posledniho argumentu
+# instrukce a zaroven ulozi vysledek operace "and"
+def check_last_arg_and_get_and(var, first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "bool":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() == "true" and arg3.get_value() == "true":
+            var.edit_value("true", "bool")
+        else:
+            var.edit_value("false", "bool")
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="bool")
+        if first_value.get_value() == "true" and var2.get_value() == "true":
+            var.edit_value("true", "bool")
+        else:
+            var.edit_value("false", "bool")
+
+
+# funkce, ktera vykona instrukci and
 def execute_and(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -559,37 +587,32 @@ def execute_and(gf, tf, lf, instr):
         if arg2.get_type() != "bool":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == "true" and arg3.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
-            if arg2.get_value() == "true" and var2.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
+        check_last_arg_and_get_and(var, arg2, arg3, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="bool")
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() == "true" and var2.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
+        check_last_arg_and_get_and(var, var2, arg3, instr, gf, tf, lf)
+
+
+# pomocna funkce pro "execute_and" ktera slouzi ke kontrole posledniho argumentu
+# instrukce a zaroven ulozi vysledek operace "and"
+def check_last_arg_and_get_or(var, first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "bool":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() == "true" or arg3.get_value() == "true":
+            var.edit_value("true", "bool")
         else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
-            if var2.get_value() == "true" and var3.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
+            var.edit_value("false", "bool")
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="bool")
+        if first_value.get_value() == "true" or var2.get_value() == "true":
+            var.edit_value("true", "bool")
+        else:
+            var.edit_value("false", "bool")
 
 
+# funkce, ktera provede instrukci or
 def execute_or(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -597,37 +620,14 @@ def execute_or(gf, tf, lf, instr):
         if arg2.get_type() != "bool":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == "true" or arg3.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
-            if arg2.get_value() == "true" or var2.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
+        check_last_arg_and_get_or(var, arg2, arg3, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="bool")
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "bool":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() == "true" or var2.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
-        else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="bool")
-            if var2.get_value() == "true" or var3.get_value() == "true":
-                var.edit_value("true", "bool")
-            else:
-                var.edit_value("false", "bool")
+        check_last_arg_and_get_or(var, var2, arg3, instr, gf, tf, lf)
 
 
+# funkce, ktera provede instrukci not
 def execute_not(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -639,13 +639,14 @@ def execute_not(gf, tf, lf, instr):
         else:
             var.edit_value("true", "bool")
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="bool")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="bool")
         if var2.get_value() == "true":
             var.edit_value("false", "bool")
         else:
             var.edit_value("true", "bool")
 
 
+# funkce, ktera provede instrukci strlen
 def execute_strlen(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -654,8 +655,20 @@ def execute_strlen(gf, tf, lf, instr):
             print_error(WRONG_OPERAND_TYPE_ERROR)
         var.edit_value(len(arg2.get_value()), "int")
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="string")
         var.edit_value(len(var2.get_value()), "int")
+
+
+# pomocna funkce pro "execute_concat" ktera slouzi ke kontrole posledniho
+# argumentu instrukce a zaroven ulozi vysledek operace "concat"
+def check_last_arg_and_concat(var, first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "string":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        var.edit_value(first_value.get_value() + arg3.get_value(), "string")
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="string")
+        var.edit_value(first_value.get_value() + var2.get_value(), "string")
 
 
 def execute_concat(gf, tf, lf, instr):
@@ -665,25 +678,14 @@ def execute_concat(gf, tf, lf, instr):
         if arg2.get_type() != "string":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(arg2.get_value() + arg3.get_value(), "string")
-        else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
-            var.edit_value(arg2.get_value() + var2.get_value(), "string")
+        check_last_arg_and_concat(var, arg2, arg3, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="string")
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            var.edit_value(var2.get_value() + arg3.get_value(), "string")
-        else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
-            var.edit_value(var2.get_value() + var3.get_value(), "string")
+        check_last_arg_and_concat(var, var2, arg3, instr, gf, tf, lf)
 
 
+# funkce, ktera provede instrukci "type"
 def execute_type(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -696,6 +698,7 @@ def execute_type(gf, tf, lf, instr):
         var.edit_value(var2.get_type(), "string")
 
 
+# funkce, ktera provede instrukci "exit"
 def execute_exit(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "var":
@@ -705,12 +708,13 @@ def execute_exit(gf, tf, lf, instr):
             print_error(WRONG_OPERAND_VALUE_ERROR)
         exit(int(arg1.get_value()))
     else:
-        var = get_and_check_var(instr, 1, gf, tf, lf, check_type=1, checking_type="int")
+        var = get_and_check_var(instr, 1, gf, tf, lf, check_empty=1, checking_type="int")
         if int(var.get_value()) > 49 or int(var.get_value()) < 0:
             print_error(WRONG_OPERAND_VALUE_ERROR)
         exit(int(var.get_value()))
 
 
+# funkce, ktera provede instrukci "dprint"
 def execute_dprint(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "var":
@@ -725,6 +729,20 @@ def execute_dprint(gf, tf, lf, instr):
         sys.stderr.write("{}".format(var.get_value()))
 
 
+# pomocna funkce pro "stri2int", kontroluje spravnost stringu
+# a pozice a do var ulozi ord
+def get_ord(var, string, position):
+    if position.get_type() != "int":
+        print_error(WRONG_OPERAND_TYPE_ERROR)
+    if position.get_value() < 0:
+        print_error(WRONG_STRING_WORKING_ERROR)
+    try:
+        var.edit_value(ord(string.get_value()[int(position.get_value())]), "int")
+    except IndexError:
+        print_error(WRONG_STRING_WORKING_ERROR)
+
+
+# funkce, ktera provede instrukci "stri2int"
 def execute_stri2int(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -735,18 +753,41 @@ def execute_stri2int(gf, tf, lf, instr):
         if arg3.get_type() != "var":
             get_ord(var, arg2, arg3)
         else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="int")
             get_ord(var, arg2, var2)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="string")
         arg3 = instr.get_argument(3)
         if arg3.get_type() != "var":
             get_ord(var, var2, arg3)
         else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
+            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="int")
             get_ord(var, var2, var3)
 
 
+# pomocna funkce pro "getchar", kontroluje spravnost posledniho argumentu
+# a do var ulozi pozadovany char
+def check_last_arg_and_get_getchar(var, first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "int":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if int(arg3.get_value()) < 0:
+            print_error(WRONG_STRING_WORKING_ERROR)
+        try:
+            var.edit_value(first_value.get_value()[int(arg3.get_value())], "string")
+        except IndexError:
+            print_error(WRONG_STRING_WORKING_ERROR)
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="int")
+        if int(var2.get_value()) < 0:
+            print_error(WRONG_STRING_WORKING_ERROR)
+        try:
+            var.edit_value(first_value.get_value()[int(var2.get_value())], "string")
+        except IndexError:
+            print_error(WRONG_STRING_WORKING_ERROR)
+
+
+# funkce ktera vykona instrukci getchar
 def execute_getchar(gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
@@ -754,94 +795,53 @@ def execute_getchar(gf, tf, lf, instr):
         if arg2.get_type() != "string":
             print_error(WRONG_OPERAND_TYPE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if int(arg3.get_value()) < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(arg2.get_value()[int(arg3.get_value())], "string")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
-        else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
-            if int(var2.get_value()) < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(arg2.get_value()[int(var2.get_value())], "string")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+        check_last_arg_and_get_getchar(var, arg2, arg3, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="string")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="string")
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "int":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if int(arg3.get_value()) < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(var2.get_value()[int(arg3.get_value())], "string")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
-        else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="int")
-            if int(var3.get_value()) < 0:
-                print_error(WRONG_STRING_WORKING_ERROR)
-            try:
-                var.edit_value(var2.get_value()[int(var3.get_value())], "string")
-            except IndexError:
-                print_error(WRONG_STRING_WORKING_ERROR)
+        check_last_arg_and_get_getchar(var, var2, arg3, instr, gf, tf, lf)
 
 
+# pomocna funkce pro "setchar", ktera zkontroluje spravnost druheho a tretiho
+# argumentu a vysledek ulozi do var
+def check_last_2args_and_get_setchar(var, first_value, instr, gf, tf, lf):
+    if int(first_value.get_value()) < 0 or int(first_value.get_value()) > len(var.get_value()) - 1:
+        print_error(WRONG_STRING_WORKING_ERROR)
+    arg3 = instr.get_argument(3)
+    if arg3.get_type() != "var":
+        if arg3.get_type() != "string":
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if arg3.get_value() == "":
+            print_error(WRONG_STRING_WORKING_ERROR)
+        var.edit_value(
+            var.get_value()[:first_value.get_value()] + arg3.get_value()[0] + var.get_value()
+            [first_value.get_value() + 1:], "string")
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1, checking_type="string")
+        if var2.get_value() == "":
+            print_error(WRONG_STRING_WORKING_ERROR)
+        var.edit_value(
+            var.get_value()[:first_value.get_value()] + var2.get_value()[0]
+            + var.get_value()[first_value.get_value() + 1:], "string")
+
+
+# funkce ktera vykona instrukci setchar
 def execute_setchar(gf, tf, lf, instr):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "var":
         print_error(WRONG_OPERAND_TYPE_ERROR)
-    var = get_and_check_var(instr, 1, gf, tf, lf, check_type=1, checking_type="string")
+    var = get_and_check_var(instr, 1, gf, tf, lf, check_empty=1, checking_type="string")
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         if arg2.get_type() != "int":
             print_error(WRONG_OPERAND_TYPE_ERROR)
-        if int(arg2.get_value()) < 0 or int(arg2.get_value()) > len(var.get_value()) - 1:
-            print_error(WRONG_STRING_WORKING_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() == "":
-                print_error(WRONG_STRING_WORKING_ERROR)
-            var.edit_value(
-                var.get_value()[:arg2.get_value()] + arg3.get_value()[0] + var.get_value()[arg2.get_value() + 1:],
-                "string")
-        else:
-            var2 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
-            if var2.get_value() == "":
-                print_error(WRONG_STRING_WORKING_ERROR)
-            var.edit_value(
-                var.get_value()[:arg2.get_value()] + var2.get_value()[0] + var.get_value()[arg2.get_value() + 1:],
-                "string")
+        check_last_2args_and_get_setchar(var, arg2, instr, gf, tf, lf)
     else:
-        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_type=1, checking_type="int")
-        if int(var2.get_value()) < 0 or int(var2.get_value()) > len(var.get_value()) - 1:
-            print_error(WRONG_STRING_WORKING_ERROR)
-        arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg3.get_type() != "string":
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg3.get_value() == "":
-                print_error(WRONG_STRING_WORKING_ERROR)
-            var.edit_value(
-                var.get_value()[:var2.get_value()] + arg3.get_value()[0] + var.get_value()[var2.get_value() + 1:],
-                "string")
-        else:
-            var3 = get_and_check_var(instr, 3, gf, tf, lf, check_type=1, checking_type="string")
-            if var3.get_value() == "":
-                print_error(WRONG_STRING_WORKING_ERROR)
-            var.edit_value(
-                var.get_value()[:var2.get_value()] + var3.get_value()[0] + var.get_value()[var2.get_value() + 1:],
-                "string")
+        var2 = get_and_check_var(instr, 2, gf, tf, lf, check_empty=1, checking_type="int")
+        check_last_2args_and_get_setchar(var, var2, instr, gf, tf, lf)
 
 
+# funkce ktera vykona instrukci jump
 def execute_jump(instr):
     index = get_label_index(instr.get_argument(1).get_value())
     if index is None:
@@ -849,27 +849,31 @@ def execute_jump(instr):
     return index
 
 
+# pomocna funkce pro "jumpifeq", kontroluje spravnost posledniho argumentu
+# a vraci 1 pokud se ma skocit, 0 pokud ne
+def check_last_arg_and_get_jumpifeq(first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if first_value.get_type() != "nil" and arg3.get_type() != "nil" and first_value.get_type() != arg3.get_type():
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() == arg3.get_value():
+            return 1
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1)
+        if var2.get_type() != "nil" and first_value.get_type() != "nil" and var2.get_type() != first_value.get_type():
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() == var2.get_value():
+            return 1
+    return 0
+
+
+# funkce ktera vykona jumpifeq
 def execute_jumpifeq(gf, tf, lf, instr, i):
     index = get_index_check_label(instr)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg2.get_type() != "nil" and arg3.get_type() != "nil" and arg2.get_type() != arg3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == arg3.get_value():
-                return index
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "nil" and arg2.get_type() != "nil" and var2.get_type() != arg2.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() == var2.get_value():
-                return index
+        if check_last_arg_and_get_jumpifeq(arg2, arg3, instr, gf, tf, lf):
+            return index
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
@@ -878,46 +882,36 @@ def execute_jumpifeq(gf, tf, lf, instr, i):
         if var2.get_type() == "":
             print_error(MISSING_VALUE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if var2.get_type() != "nil" and arg3.get_type() != "nil" and var2.get_type() != arg3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() == arg3.get_value():
-                return index
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "nil" and var3.get_type() != "nil" and var2.get_type() != var3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() == var3.get_value():
-                return index
+        if check_last_arg_and_get_jumpifeq(var2, arg3, instr, gf, tf, lf):
+            return index
     return i
 
 
+# pomocna funkce pro "jumpifneq", kontroluje spravnost posledniho argumentu
+# a vraci 1 pokud se ma skocit, 0 pokud ne
+def check_last_arg_and_get_jumpifneq(first_value, arg3, instr, gf, tf, lf):
+    if arg3.get_type() != "var":
+        if first_value.get_type() != "nil" and arg3.get_type() != "nil" and first_value.get_type() != arg3.get_type():
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() != arg3.get_value():
+            return 1
+    else:
+        var2 = get_and_check_var(instr, 3, gf, tf, lf, check_empty=1)
+        if var2.get_type() != "nil" and first_value.get_type() != "nil" and var2.get_type() != first_value.get_type():
+            print_error(WRONG_OPERAND_TYPE_ERROR)
+        if first_value.get_value() != var2.get_value():
+            return 1
+    return 0
+
+
+# funkce ktera vykona instrukci jumpifneq
 def execute_jumpifneq(gf, tf, lf, instr, i):
     index = get_index_check_label(instr)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "var":
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if arg2.get_type() != "nil" and arg3.get_type() != "nil" and arg2.get_type() != arg3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() != arg3.get_value():
-                return index
-        else:
-            var2 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var2 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var2.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "nil" and arg2.get_type() != "nil" and var2.get_type() != arg2.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if arg2.get_value() != var2.get_value():
-                return index
+        if check_last_arg_and_get_jumpifneq(arg2, arg3, instr, gf, tf, lf):
+            return index
     else:
         var2 = search_variable(gf, tf, lf, arg2.get_frame(), arg2.get_value())
         if var2 is None:
@@ -926,25 +920,12 @@ def execute_jumpifneq(gf, tf, lf, instr, i):
         if var2.get_type() == "":
             print_error(MISSING_VALUE_ERROR)
         arg3 = instr.get_argument(3)
-        if arg3.get_type() != "var":
-            if var2.get_type() != "nil" and arg3.get_type() != "nil" and var2.get_type() != arg3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() != arg3.get_value():
-                return index
-        else:
-            var3 = search_variable(gf, tf, lf, arg3.get_frame(), arg3.get_value())
-            if var3 is None:
-                print_error(UNDEFINED_VARIABLE_ERROR)
-            # jedna se o nedefinovanou promennou
-            if var3.get_type() == "":
-                print_error(MISSING_VALUE_ERROR)
-            if var2.get_type() != "nil" and var3.get_type() != "nil" and var2.get_type() != var3.get_type():
-                print_error(WRONG_OPERAND_TYPE_ERROR)
-            if var2.get_value() != var3.get_value():
-                return index
+        if check_last_arg_and_get_jumpifneq(var2, arg3, instr, gf, tf, lf):
+            return index
     return i
 
 
+# funkce ktera vykona instrukci call
 def execute_call(instr, i):
     arg1 = instr.get_argument(1)
     if arg1.get_type() != "label":
@@ -956,6 +937,7 @@ def execute_call(instr, i):
     return index
 
 
+# funkce ktera vykona instrukci return
 def execute_return():
     try:
         return call_stack.pop()
@@ -963,15 +945,24 @@ def execute_return():
         print_error(MISSING_VALUE_ERROR)
 
 
+# funkce, ktera vykona instrukci break, ktera vypise
+# stav jednotlivych frame-u
 def execute_break(gf, tf, lf):
     sys.stderr.write("Obsah GF:\n")
-    sys.stderr.write("{}\n".format(gf))
+    for var in gf.variables:
+        sys.stderr.write("var: \"{}\" type: \"{}\" value: \"{}\"\n".format
+                         (var.get_name(), var.get_type(), var.get_value()))
     sys.stderr.write("Obsah TF:\n")
-    sys.stderr.write("{}\n".format(tf))
+    for var in tf.variables:
+        sys.stderr.write("var: \"{}\" type: \"{}\" value: \"{}\"\n".format
+                         (var.get_name(), var.get_type(), var.get_value()))
     sys.stderr.write("Obsah LF:\n")
-    sys.stderr.write("{}\n".format(lf))
+    for var in lf.variables:
+        sys.stderr.write("var: \"{}\" type: \"{}\" value: \"{}\"\n".format
+                         (var.get_name(), var.get_type(), var.get_value()))
 
 
+# funkce ktera vykona instrukci pushframe
 def execute_pushframe(tfdefined, tf):
     if tfdefined == 0:
         print_error(UNDEFINED_FRAME_ERROR)
@@ -979,6 +970,7 @@ def execute_pushframe(tfdefined, tf):
     return 0
 
 
+# funkce ktera vykona instrukci popframe
 def execute_popframe():
     try:
         return lf_stack.pop(), 1
@@ -986,6 +978,7 @@ def execute_popframe():
         print_error(UNDEFINED_FRAME_ERROR)
 
 
+# funkce, ktera slouzi k vykonani vsech ulozenych instrukci
 def execute_instructions(input_path):
     global tf_defined
     file = None
@@ -993,7 +986,9 @@ def execute_instructions(input_path):
         file = open(input_path, 'rb')
     except FileNotFoundError:
         print_error(INPUT_FILE_OPENING_ERROR)
-    gf = lf = tf = frame()
+    gf = frame()
+    tf = frame()
+    lf = frame()
     i = 0
     while i < len(instructions_list):
         instr = instructions_list[i]

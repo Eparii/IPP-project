@@ -367,7 +367,10 @@ foreach ($all_tests_array as $src_file)
 }
 
 $all_tests_num = sizeof($all_tests_array);
-generate_HTML_file($failed_array, $failed_tests, $passed_array, $passed_tests, $all_tests_num);
+if ($all_tests_num != 0)
+{
+    generate_HTML_file($failed_array, $failed_tests, $passed_array, $passed_tests, $all_tests_num);
+}
 if (!$nocleanArg)
 {
     delete_tmp_files();
