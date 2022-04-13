@@ -1,0 +1,12 @@
+*.html
+__pycache__
+*.hobit
+*.out_tmp
+*.err_tmp
+*.html
+!template.html
+xml_diff.xml
+*.int_*_tmp
+todo.txt
+interpret/data/
+data/

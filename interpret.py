@@ -160,6 +160,7 @@ def print_error(errorcode):
 # funkce na zkontrolovani spravnosti a jedinecnosti argumentu programu
 # zaroven pri kontrole argumentu ziska cesty k zadanym souborum
 def check_args_and_get_file_paths():
+    input_lines = None
     source_path = input_path = ""
     source_arg = input_arg = 0
     for arg in sys.argv[1:]:
@@ -182,7 +183,11 @@ def check_args_and_get_file_paths():
         source_path = sys.stdin
     elif input_arg == 0:
         input_path = sys.stdin
-    return source_path, input_path
+        input_lines = input_path.readlines()
+    else:
+        file = open(input_path)
+        input_lines = file.readlines()
+    return source_path, input_lines
 
 
 # funkce slouzici pro vypis napovedy
@@ -527,23 +532,16 @@ def execute_int2char(gf, tf, lf, instr):
 
 
 # funkce ktera provede instrukci read
-def execute_read(file, gf, tf, lf, instr):
+def execute_read(lines, gf, tf, lf, instr):
     var = get_and_check_var(instr, 1, gf, tf, lf)
     arg2 = instr.get_argument(2)
     if arg2.get_type() != "type" or arg2.get_type() == "nil":
         print_error(WRONG_OPERAND_TYPE_ERROR)
-    line = file.readline()
-    nextline = file.readline()
-    line = line.rstrip().decode('utf-8')
-    if not line:
-        # pokud existuje pristi radek a pozadovany typ je string,
-        # ulozi do promenne prazdny retezec
-        if nextline and arg2.get_value() == "string":
-            var.edit_value("", "string")
-        # pokud neexistuje pristi radek, ulozi do promenne nil@nil
-        else:
-            var.edit_value("nil", "nil")
+    if not lines:
+        var.edit_value("nil", "nil")
     else:
+        line = lines[0].rstrip()
+        lines.pop(0)
         # do hodnoty bool ulozi true pouze pokud je v souboru radek true,
         # jinak false
         if arg2.get_value() == "bool":
@@ -558,7 +556,6 @@ def execute_read(file, gf, tf, lf, instr):
                 var.edit_value("nil", "nil")
         else:
             var.edit_value(line, arg2.get_value())
-    file.seek(-len(nextline), 1)
 
 
 # pomocna funkce pro "execute_and" ktera slouzi ke kontrole posledniho argumentu
@@ -979,13 +976,8 @@ def execute_popframe():
 
 
 # funkce, ktera slouzi k vykonani vsech ulozenych instrukci
-def execute_instructions(input_path):
+def execute_instructions(input_lines):
     global tf_defined
-    file = None
-    try:
-        file = open(input_path, 'rb')
-    except FileNotFoundError:
-        print_error(INPUT_FILE_OPENING_ERROR)
     gf = frame()
     tf = frame()
     lf = frame()
@@ -1042,7 +1034,7 @@ def execute_instructions(input_path):
         elif instr_opcode == "STRI2INT":
             execute_stri2int(gf, tf, lf, instr)
         elif instr_opcode == "READ":
-            execute_read(file, gf, tf, lf, instr)
+            execute_read(input_lines, gf, tf, lf, instr)
         elif instr_opcode == "WRITE":
             execute_write(gf, tf, lf, instr)
         elif instr_opcode == "CONCAT":
