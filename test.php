@@ -224,7 +224,7 @@ foreach ($argv as $argument)
             fprintf(STDERR,"Can't use --int-only with --jexampath!\n");
             exit(WRONG_ARGUMENTS_ERROR);
         }
-        $jexampathArg = substr($argument, strpos($argument, "=") + 1);
+        $jexamPath = substr($argument, strpos($argument, "=") + 1);
         if (!is_readable($jexamPath))
         {
             printf("Couldn't reach the jexam path!\n");
