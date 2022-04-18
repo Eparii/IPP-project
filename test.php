@@ -1,10 +1,19 @@
 <?php include 'html_generator.php';
 
+/*
+
+ * Autor: Tetauer Pavel
+ * Login: xtetau00
+ * Rok: 2021/2022
+
+*/
+
 const WRONG_ARGUMENTS_ERROR = 10;
 const INPUT_FILE_OPENING_ERROR = 11;
 const OUTPUT_FILE_OPENING_ERROR = 12;
 const WRONG_DIRECTORY_ERROR = 41;
 
+// funkce slouzici k naskenovani zadane slozky
 function scan_directory($dir) : array
 {
     $results= [];
@@ -20,6 +29,7 @@ function scan_directory($dir) : array
     return $results;
 }
 
+// funkce slouzici k naskenovani zadane slozky, pokud byl zadan argument --recursive
 function scan_directory_recursive($dir, &$results)
 {
     $files = scandir($dir);
@@ -38,7 +48,9 @@ function scan_directory_recursive($dir, &$results)
     return $results;
 }
 
-
+/* funkce, ktera slouzi ke zkontrolovani testovacich souboru
+    a pripadnemu vytvoreni novych prazdnych souboru, pokud se ve
+    slozce nenachazely */
 function check_input_files($input_file, $output_file, $return_code_file)
 {
     if(!is_file($input_file))
@@ -74,6 +86,7 @@ function check_input_files($input_file, $output_file, $return_code_file)
     }
 }
 
+// funkce, ktera odstrani vytvorene pomocne soubory
 function delete_tmp_files()
 {
     $tmpdir = scandir("./tmp");
@@ -106,6 +119,8 @@ $jexampathArg=false;
 $nocleanArg=false;
 $firstArg=true;
 
+
+// cyklus pro parsovani argumentu a jejich kontrolu
 foreach ($argv as $argument)
 {
     if($firstArg)
@@ -113,6 +128,7 @@ foreach ($argv as $argument)
         $firstArg = false;
         continue;
     }
+    // vypise napovedu, pripadne chybu pokud byly zadany i jine argumenty
     if ($argument == "--help")
     {
         if ($argc != 2)
@@ -227,22 +243,28 @@ foreach ($argv as $argument)
     }
 }
 
+// vytvori pomocnou slozku tmp
 if (!is_dir("tmp"))
 {
     mkdir("tmp");
 }
+// overi, zda lze do vytvorene slozky tmp zapisovat
 if (!is_writable("./tmp"))
 {
     printf("Couldn't write output files!\n");
     exit(OUTPUT_FILE_OPENING_ERROR);
 }
+// overi, zda zadana directory existuje a zda mame prava pro cteni
 if (!is_dir($directory_path) || !is_readable($directory_path))
 {
     printf("Couldn't reach the directory!\n");
     exit(WRONG_DIRECTORY_ERROR);
 }
 
+// ulozi vsechny testovaci soubory do pole $all_tests_only
 $recursiveArg ? $all_tests_array = scan_directory_recursive($directory_path, $all_tests_array) : $all_tests_array = scan_directory($directory_path);
+
+// hlavni cyklus, ve kterem se provadi veskere testovani
 foreach ($all_tests_array as $src_file)
 {
     $test_output_name = preg_replace("/\.src/", "_test.out", substr($src_file, strrpos($src_file, '/') + 1));
@@ -253,9 +275,12 @@ foreach ($all_tests_array as $src_file)
     $return_code_file = fopen("$return_code_file", "r");
     $expected_return = fgets($return_code_file);
     fclose($return_code_file);
+
+    // testuje se pouze parser
     if ($parseOnlyArg)
     {
         exec("php8.1 $parse_script < $src_file > ./tmp/$test_output_name", $output, $return_code);
+        // ocekavany chybovy kod byl 0 a zaroven se z parseru vratil kod 0
         if ($expected_return == 0 and $return_code == 0)
         {
             exec("java -jar $jexamPath/jexamxml.jar ./tmp/$test_output_name $output_file delta.xml $jexamPath/options", $output, $return_code);
@@ -270,6 +295,7 @@ foreach ($all_tests_array as $src_file)
                 $failed_array[] = $src_file;
             }
         }
+        // ocekavany kod nebyl 0 nebo se z parseru vratil nenulovy kod
         else
         {
             if ($expected_return == $return_code)
@@ -284,9 +310,12 @@ foreach ($all_tests_array as $src_file)
             }
         }
     }
+
+    // testuje se pouze interpret
     else if ($intOnlyArg)
     {
         exec("python3 $int_script --source=$src_file --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+        // ocekavany chybovy kod byl 0 a zaroven se z interpretu vratil kod 0
         if ($expected_return == 0 and $return_code == 0)
         {
             exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);
@@ -301,6 +330,7 @@ foreach ($all_tests_array as $src_file)
                 $failed_array[] = $src_file;
             }
         }
+        // ocekavany chybovy kod nebyl 0 nebo se z interpretu vratil nenulovy kod
         else
         {
             if ($expected_return == $return_code)
@@ -315,13 +345,17 @@ foreach ($all_tests_array as $src_file)
             }
         }
     }
+    // testuje se interpret i parser zaroven
     else
     {
+        // soubor, kam se ulozi xml reprezentace, ktera vyjde z parseru
         $parser_output = preg_replace("/\.src/", "_parser.out", substr($src_file, strrpos($src_file, '/') + 1));
         exec("php8.1 $parse_script < $src_file > ./tmp/$parser_output", $output, $return_code);
+        // parser vratil return code 0, muze se pokracovat na interpret
         if ($return_code == 0)
         {
             exec("python3 $int_script --source=./tmp/$parser_output --input=$input_file > ./tmp/$test_output_name", $output, $return_code);
+            // interpret vratil 0, otestuje se, zda maji stejny vystup
             if ($return_code == 0)
             {
                 exec("diff ./tmp/$test_output_name $output_file", $output, $return_code);
@@ -336,6 +370,7 @@ foreach ($all_tests_array as $src_file)
                     $failed_array[] = $src_file;
                 }
             }
+            // interpret nevratil 0, zkontroluje se, zda navratova hodnota sedi s testovaci
             else
             {
                 if ($expected_return == $return_code)
@@ -350,6 +385,7 @@ foreach ($all_tests_array as $src_file)
                 }
             }
         }
+        // parser vratil nenulovy navratovy kod, zkontroluje se, zda souhlasi s ocekavanym
         else
         {
             if ($expected_return == $return_code)
@@ -366,11 +402,14 @@ foreach ($all_tests_array as $src_file)
     }
 }
 
+
 $all_tests_num = sizeof($all_tests_array);
+// generovani vystupniho HTML souboru pomoci funkci implementovanych v "html_generator.php"
 if ($all_tests_num != 0)
 {
     generate_HTML_file($failed_array, $failed_tests, $passed_array, $passed_tests, $all_tests_num);
 }
+// odstrani pomocne soubory
 if (!$nocleanArg)
 {
     delete_tmp_files();

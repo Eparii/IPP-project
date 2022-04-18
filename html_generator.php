@@ -1,5 +1,6 @@
 <?php
 
+// zahajeni generovani HTML souboru
 function HTML_generate_start()
 {
     print ("<!DOCTYPE html>
@@ -10,8 +11,10 @@ function HTML_generate_start()
 </head>
 <body>\n");
 }
+// vygeneruje tabulku s vysledky testu
 function HTML_generate_table($failed_tests_num, $passed_tests_num, $all_tests_num)
 {
+    // vypocita procentualni uspesnost zaokrouhlenou na 2 desetinna mista
     $successful_percentage = round($passed_tests_num/$all_tests_num * 100, 2);
     print ("\t<table>
         <tr>
@@ -35,6 +38,8 @@ function HTML_generate_table($failed_tests_num, $passed_tests_num, $all_tests_nu
         </tr>
     </table>\n");
 }
+
+// vygeneruje seznamy uspesnych a neuspesnych testu
 function HTML_generate_tests_lists($failed_array, $passed_array)
 {
     print("\t<div class = \"tests_lists\">
@@ -62,11 +67,13 @@ function HTML_generate_tests_lists($failed_array, $passed_array)
 \t\t</div>
 \t</div>\n");
 }
+// ukonci html soubor
 function HTML_generate_end()
 {
     print ("</body>\n</html>");
 }
 
+// hlavni funkce, ze ktere se vola cele generovani souboru
 function generate_HTML_file($failed_array, $failed_tests_num, $passed_array, $passed_tests_num, $all_tests_num)
 {
     HTML_generate_start();

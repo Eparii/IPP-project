@@ -1,3 +1,7 @@
+ # Autor: Tetauer Pavel
+ # Login: xtetau00
+ # Rok: 2021/2022
+
 import sys
 import re
 import xml.etree.ElementTree as ET
