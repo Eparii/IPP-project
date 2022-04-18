@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<program language="IPPcode22" name="correct">
+	<instruction order="2" opcode="DEFVAR">
+		<arg1 type="var">GF@var2</arg1>
+	</instruction>
+	<instruction order="3" opcode="CREATEFRAME">
+	</instruction>
+	<instruction order="4" opcode="PUSHFRAME">
+	</instruction>
+	<instruction order="5" opcode="POPFRAME">
+	</instruction>
+	<instruction order="6" opcode="POPFRAME">
+	</instruction>
+</program>
